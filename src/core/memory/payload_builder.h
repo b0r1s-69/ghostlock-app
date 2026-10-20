@@ -17,6 +17,12 @@ namespace ghostlock::memory {
         Disabled = 0,
         Zero = 1,
         Credential = 2,
+        /* W3 no-panic attempt. The route's value write only applies 0 or a
+         * valid kernel pointer, so these values are not written on this
+         * kernel (verified: the child stays Seccomp: 2). The final profile
+         * sets w3_attempts=0 and uses Shizuku. */
+        SeccompFlags = 3,
+        SeccompMode = 4,
     };
 
     struct WriteRequest final {
