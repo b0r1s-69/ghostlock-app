@@ -53,5 +53,5 @@ After reboot, start Shizuku and Run again.
 
 Kernel exploit. Use only on a device you own and are authorized to modify. It can panic, reboot, corrupt memory, or lose data. The bootloader remains locked. No warranty.
 
-Source and details: https://github.com/b0r1s-69/ghostlock-x6840
+Source and details: https://github.com/b0r1s-69/ghostlock-app
 Upstream: https://github.com/YuKongA/ghostlock-app

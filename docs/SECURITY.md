@@ -46,4 +46,4 @@ Apache License 2.0. The upstream GhostLock license and notices are retained in [
 
 ## Reporting
 
-Bugs in this port: open an issue in `b0r1s-69/ghostlock-x6840`. Bugs in the exploit core or the upstream app: report to [YuKongA/ghostlock-app](https://github.com/YuKongA/ghostlock-app). Do not publish working exploit details for devices you do not own.
+Bugs in this port: open an issue in `b0r1s-69/ghostlock-app`. Bugs in the exploit core or the upstream app: report to [YuKongA/ghostlock-app](https://github.com/YuKongA/ghostlock-app). Do not publish working exploit details for devices you do not own.

@@ -40,7 +40,7 @@
 
 ## Quick start (release build)
 
-The prebuilt APK is attached to the [x6840‑v1 release](https://github.com/b0r1s-69/ghostlock-x6840/releases/tag/x6840-v1). It is signed with a **test key**, not the upstream release key. Verify the checksum from `release/sha256sums.txt` before installing.
+The prebuilt APK is attached to the [x6840‑v1 release](https://github.com/b0r1s-69/ghostlock-app/releases/tag/x6840-v1). It is signed with a **test key**, not the upstream release key. Verify the checksum from `release/sha256sums.txt` before installing.
 
 1. **Install the root manager** — [BakaSU](https://github.com/Baka-SU/BakaSU) (`com.resukisu.resukisu`). GhostLock extracts its `libksud.so` during the handoff.
 2. **Install Shizuku** — [Shizuku](https://github.com/RikkaApps/Shizuku) / Shizuku‑Next (`moe.shizuku.privileged.api`). Start its server from the app (wireless ADB is enough; `tools/scan_adb.py` finds the current port).
