@@ -30,7 +30,10 @@ object ProfileMerger {
         routePresets: Map<String, ValueMap>,
     ): ValueMap {
         val defaults = valueMapOf("release" to deviceRelease).apply {
-            if (tuningExecution != null) put("execution", tuningExecution)
+            /* Copy the shared preset: the merges below mutate their destination,
+             * so storing the caller's map would let one profile's execution
+             * overrides leak into every profile resolved afterwards. */
+            if (tuningExecution != null) put("execution", tuningExecution.copyValue())
         }
         val resolved = mergeSource(
             mergeSource(
@@ -62,7 +65,8 @@ object ProfileMerger {
             val defaults = routePresets[route] ?: continue
             val existing = routes[route].asValueMap()
             if (existing == null) {
-                routes[route] = defaults
+                /* Same reason: never alias the shared route preset into a result. */
+                routes[route] = defaults.copyValue()
                 continue
             }
             for ((key, value) in defaults) {
