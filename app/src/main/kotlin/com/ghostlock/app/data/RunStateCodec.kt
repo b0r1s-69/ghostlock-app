@@ -16,6 +16,13 @@ object RunStateCodec {
     const val InProgress = "in_progress"
     const val Completed = "completed"
 
+    /**
+     * Terminal failure reported by the native side. Distinct from [InProgress]
+     * so a rejected step is never mistaken for a panic-interrupted one, and
+     * never for a success. Emitted by `run_state::fail()`.
+     */
+    const val Failed = "failed"
+
     fun initial(updatedAt: Long): String = encode(Steps.associateWith { NotStarted }, updatedAt)
 
     fun encode(steps: Map<String, String>, updatedAt: Long): String = buildString {

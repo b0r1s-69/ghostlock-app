@@ -37,14 +37,21 @@ namespace {
         return condition;
     }
 
-    ghostlock::runtime::RunResult run_once() {
+    /* `app_flow` selects the environment the backend runs in:
+     *   true  -> zygote app process WITH a seccomp filter (W3 would be needed)
+     *   false -> adb/shell flow reporting Seccomp: 0 (W3 is skipped)
+     * The shell flow is the supported path. W3 in the app flow is disarmed in
+     * this build, so `app_flow = true` with w3_attempts > 0 must fail. */
+    ghostlock::runtime::RunResult run_once(bool app_flow = false,
+                                           uint32_t w3_attempts = 0) {
+        script().process_has_seccomp_value = app_flow ? 1 : 0;
         ghostlock::profile::kernel_offsets decoded{};
         decoded.meta.kernel_major = 6;
         decoded.execution.w1_attempts = 3;
         decoded.execution.w1_scratch_repair_attempts = 1;
         decoded.execution.w2_attempts = 4;
         decoded.execution.w3_chain_rounds = 2;
-        decoded.execution.w3_attempts = 3;
+        decoded.execution.w3_attempts = w3_attempts;
         ghostlock::session::g_exploit_session.profile =
                 ghostlock::profile::TargetProfile::from(&decoded);
         return ghostlock::runtime::Pipeline<
@@ -64,8 +71,29 @@ namespace {
                      "happy: terminal stage is the frontend");
         ok &= expect(count_calls("spawn") == 1, "happy: exactly one victim spawn");
         ok &= expect(count_calls("verify_w2") >= 1, "happy: W2 verified");
-        ok &= expect(count_calls("verify_seccomp") >= 1, "happy: W3 seccomp verified");
+        /* Shell flow: no app seccomp filter, so W3 is skipped entirely. */
+        ok &= expect(count_calls("verify_seccomp") == 0,
+                     "happy: W3 seccomp probe not reached in the shell flow");
         ok &= expect(count_calls("route") >= 1, "happy: at least one route write");
+        return ok;
+    }
+
+    /* The disarmed W3 must never attempt the seccomp write. The pipeline
+     * deliberately continues to the frontend handoff after W3 is refused (the
+     * chain rounds exist for retryable failures), so the guarantee under test
+     * is "no seccomp probe/write was attempted", not "the run aborts". On a
+     * real device the handoff then fails because ksud cannot load the module.
+     * This is the regression guard for the old behaviour, where the stub route
+     * accepted a value the primitive cannot express and the run claimed a
+     * successful bypass. */
+    bool test_w3_disarmed_in_app_flow() {
+        reset_script();
+        const auto result = run_once(/*app_flow=*/true, /*w3_attempts=*/3);
+        bool ok = true;
+        ok &= expect(count_calls("verify_seccomp") == 0,
+                     "w3-disarmed: no seccomp write is attempted");
+        ok &= expect(result.stage == ghostlock::runtime::RunStage::Frontend,
+                     "w3-disarmed: run reaches the frontend handoff without crashing");
         return ok;
     }
 
@@ -115,6 +143,7 @@ namespace {
 int main() {
     bool ok = true;
     ok &= test_happy_path();
+    ok &= test_w3_disarmed_in_app_flow();
     ok &= test_w2_retry_until_success();
     ok &= test_w2_exhausts_attempts();
     ok &= test_selinux_retry_then_w2();

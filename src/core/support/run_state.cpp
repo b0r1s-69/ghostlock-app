@@ -77,4 +77,6 @@ namespace ghostlock::support::run_state {
     void enter(const char *step) noexcept { transition(step, "in_progress"); }
 
     void complete(const char *step) noexcept { transition(step, "completed"); }
+
+    void fail(const char *step) noexcept { transition(step, "failed"); }
 } // namespace ghostlock::support::run_state

@@ -172,3 +172,52 @@ Unloading the Shizuku path is not recommended for normal use. The in-process pat
 - The W3 **panic** is fixed by the masked/mode form: no kernel crash, all steps complete.
 - The W3 **seccomp bypass** is not fixed. The write primitive cannot store the required values. The child remains `Seccomp: 2`; `finit_module` is blocked; the module does not load.
 - The final configuration uses Shizuku and `w3_attempts=0`. Do not enable the in-process W3 path on this kernel.
+
+## Corrections (review pass)
+
+Three claims in this document were wrong or overstated. The code now enforces the
+conclusions below rather than relying on prose.
+
+### 1. `SeccompFlags` was never a flag-preserving mask
+
+`~(1ULL << kernel::TIF_SECCOMP_BIT)` evaluates to `0xFFFFFFFFFFFFF7FF`. This does
+**not** clear only `TIF_SECCOMP`: it sets **every other bit to 1**, including
+`TIF_SIGPENDING`, `TIF_NEED_RESCHED`, `TIF_NOTIFY_RESUME`, `TIF_UPROBE` and
+`TIF_PATCH_PENDING`. A blind store cannot express a read-modify-write, so no
+constant can be the correct value here. The earlier text called this "the safe
+variant"; it was only less fatal than the zero store, not correct.
+
+### 2. The `finit_module` probe does not prove what it claimed
+
+`seccomp finit_module probe = 0xfffffffd` is `-ESRCH`, **not** a SIGSYS marker. A
+`SECCOMP_RET_KILL` action terminates the thread and cannot return an errno; a
+`SECCOMP_RET_ERRNO` action surfaces as an ordinary negative errno (commonly
+`-ENOSYS` = 38). An **unfiltered** `finit_module` also returns `-ESRCH` for a bad
+fd, so this probe cannot separate "the filter blocked it" from "the syscall ran
+and rejected its arguments". It can confirm success (`code == 0`); it cannot
+confirm that seccomp is still armed. The old comment asserted the opposite.
+
+### 3. W3 now reports failure instead of success
+
+Previously `w3b` / `w3c` were recorded as `completed` as soon as the route
+returned, even when the target was unchanged — which is how the no-op writes were
+mistaken for a working bypass. The status file now uses a terminal `failed`
+state, and a step is only marked `completed` after `verify_seccomp_probe_stage()`
+confirms the change.
+
+### Enforcement
+
+- `payload_write_layout()` rejects `WriteMode::SeccompFlags` and
+  `WriteMode::SeccompMode`; `payload_write_layout_matches_request()` rejects them
+  again defensively.
+- The W3 stage refuses up front when `w3_attempts > 0`, before arming the route.
+  Without that guard the request would be rejected inside
+  `prepare_kernel_page()` and burn the full heap-prepare timeout (240 s) first.
+- Nothing is written to the kernel on this path, so the panic cannot recur even if
+  `w3_attempts` is raised.
+
+### Still true
+
+The primitive's value space (`0` or a valid mapped kernel pointer) is unchanged.
+W3 cannot be made to work with this bug. The supported path remains the
+adb/shell flow, where the process reports `Seccomp: 0` and W3 is skipped.

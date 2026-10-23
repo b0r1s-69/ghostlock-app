@@ -233,9 +233,20 @@ namespace ghostlock::session::victim {
             return 0;
         }
         pr_info("seccomp finit_module probe = 0x%x\n", code);
-        /* SIGSYS (0xfffffffd) = filter kills; EPERM/ENOSYS = its RET_ERRNO actions.
-     * With init_cred + permissive SELinux a real probe fails with a normal
-     * errno instead. */
+        /* Corrected interpretation (the previous comment was wrong):
+         *
+         * A SECCOMP_RET_KILL/SIGSYS action terminates the thread; it cannot
+         * return an errno, so 0xfffffffd is NOT a SIGSYS marker. It is -ESRCH.
+         * The filter's RET_ERRNO actions surface as ordinary negative errnos
+         * (commonly -ENOSYS = 38, sometimes -EPERM).
+         *
+         * The ambiguity matters: an UNFILTERED finit_module also returns -ESRCH
+         * for a bogus fd, so a -ESRCH result cannot distinguish "the filter
+         * blocked it" from "the syscall ran and rejected the arguments". This
+         * probe therefore proves success (code == 0) but never proves that the
+         * filter is still active. It is kept conservative -- every non-zero
+         * result is treated as "not bypassed" -- and must not be cited as
+         * evidence that seccomp is still armed. */
         if (code == 0xfffffffd || code == 0xfffffffe || code == 0xffffffff ||
             code == 1 || code == 38) {
             return 0;

@@ -17,10 +17,17 @@ namespace ghostlock::memory {
         Disabled = 0,
         Zero = 1,
         Credential = 2,
-        /* W3 no-panic attempt. The route's value write only applies 0 or a
-         * valid kernel pointer, so these values are not written on this
-         * kernel (verified: the child stays Seccomp: 2). The final profile
-         * sets w3_attempts=0 and uses Shizuku. */
+        /* UNSUPPORTED — always rejected by payload_write_layout() and
+         * payload_write_layout_matches_request().
+         *
+         * The primitive stores only 0 or a valid mapped kernel pointer, so it
+         * cannot express a TIF mask or the `mode = 0, filter_count = 1` word.
+         * These enumerators are retained only so the W3 stage can be compiled
+         * and can fail explicitly; they never reach the kernel.
+         *
+         * Historical note: the earlier mask value used `~(1ULL << bit)`, which
+         * sets every OTHER TIF bit to 1 rather than preserving existing flags,
+         * so it was never a correct flag-clearing mask even in principle. */
         SeccompFlags = 3,
         SeccompMode = 4,
     };

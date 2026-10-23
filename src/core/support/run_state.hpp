@@ -30,6 +30,13 @@ namespace ghostlock::support::run_state {
 
     /* Announce that `step` finished and wait for the app to persist it. */
     void complete(const char *step) noexcept;
+
+    /* Announce that `step` failed and wait for the app to persist it.
+     * `complete` must mean "verified by a probe", never merely "the route
+     * returned success": a route can accept a write the primitive cannot
+     * express, and recording that as completed is how W3's no-op writes were
+     * previously mistaken for a working bypass. */
+    void fail(const char *step) noexcept;
 } // namespace ghostlock::support::run_state
 
 #endif

