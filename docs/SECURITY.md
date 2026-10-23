@@ -25,13 +25,14 @@ It is a convenience build of this source, not an official upstream release. Veri
 
 ## Temporary root
 
-The KernelSU LKM is loaded through a Shizuku shell (UID 2000) and is not persistent. After every reboot:
+The KernelSU LKM is loaded by the rooted child inside the app process (no ADB, no Shizuku
+needed) and is not persistent. After every reboot:
 
-- Shizuku's server stops.
+- the LKM unloads (a Shizuku server stops too, if one was used).
 - The LKM unloads.
 - The bootloader remains locked.
 
-Start Shizuku and tap **Run** again. Do not expect root at boot.
+Tap **Run** again. Do not expect root at boot.
 
 ## Privacy
 

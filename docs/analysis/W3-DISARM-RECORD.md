@@ -1,3 +1,19 @@
+> [!IMPORTANT]
+> **Superseded by the W3 zero-store fix.**
+> This record's premise - "the write primitive cannot express the values W3 needs" - was
+> correct only for the *non-zero* values it examined. Zero is inside the primitive's value
+> space, so W3 does work: the rooted child is parked, `thread_info.flags` and
+> `seccomp.mode` are zeroed, and a forked probe proves the descendants inherit
+> `Seccomp: 0`.
+> See [W3-SECCOMP-ANALYSIS.md](../W3-SECCOMP-ANALYSIS.md) and
+> [w3-seccomp-zero-store-plan.md](w3-seccomp-zero-store-plan.md).
+>
+> Three findings from this review **survive and are now enforced**: the mask critique
+> (`~(1<<bit)` sets every other bit), the correction that `0xfffffffd` is `-ESRCH` and the
+> errno probe cannot prove a bypass, and the rule that a step is only `completed` after
+> verification (`run_state::fail()` / `RunStateCodec.Failed`, which the zero-store W3 now
+> uses). Everything below is kept as the historical record of the disarm.
+
 # W3 disarm — change record
 
 **Level:** L (attack-critical path + cross-layer Native↔Kotlin contract)

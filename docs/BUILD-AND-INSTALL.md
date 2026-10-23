@@ -9,7 +9,7 @@
 - The matching firmware (`boot.img`, `vendor_boot.img`) if you need to re-extract offsets.
 - A test keystore. The published APK uses a test key:
   `CN=GhostLock Test, O=Test`, SHA-256 `57484e77dc0dbf74c94516d07ac2c2724e5bde0778991a7454f71babb079db2e`.
-- BakaSU and Shizuku for the root handoff.
+- BakaSU for the root manager. Shizuku is optional (shell flow only).
 
 ## Build the native core
 
@@ -26,13 +26,51 @@ $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip \
   --strip-all build/native/ghostlock
 ```
 
-The W3 mask/value code is in:
+The W3 zero-store code is in:
 
-- `src/core/memory/payload_builder.h` — `WriteMode::SeccompFlags` / `SeccompMode`.
-- `src/core/memory/payload_builder.cpp` — the mask / `mode=0, filter_count=1` layout.
-- `src/core/session/backend/cve_2026_43499_backend.cpp` — the W3 sequence.
+- `src/core/session/backend/cve_2026_43499_backend.cpp` — `w3()`: park, two zero stores,
+  resume, read-back, probe.
+- `src/core/session/victim_process.cpp` — the `S` protocol step (`raise(SIGSTOP)`, then
+  report `Seccomp:`), `stop_child()`, `continue_and_report_seccomp()`.
+- `src/core/memory/payload_builder.h` — the documented value space (zero or a kernel
+  pointer; there is no mask arm).
 
-## Repack the APK
+## Build the release APK
+
+Gradle builds and signs the APK in one step. A keystore is optional: without one the
+release variant falls back to the debug key, which is fine for a local test device but
+cannot replace an APK signed by another key.
+
+```bash
+# local.properties (gitignored)
+sdk.dir=/path/to/android-sdk
+ndk.dir=/path/to/android-sdk/ndk/<version>
+KEYSTORE_PATH=/path/to/ghostlock-release.jks
+KEYSTORE_PASS=...
+KEY_ALIAS=ghostlock
+KEY_PASSWORD=...
+
+ANDROID_NDK_HOME=/path/to/android-sdk/ndk/<version> ./gradlew :app:assembleRelease
+```
+
+Output: `build/app/outputs/apk/release/GhostLock-v<versionName>(<versionCode>)-arm64-v8a-release.apk`.
+The task first builds `build/native/ghostlock`, copies it to `app/src/main/jniLibs/`
+stripped, and also builds the Rust extractor for `aarch64-linux-android`. `versionCode` is
+`max(git rev-list --count HEAD, 578)` and `versionName` is set in `app/build.gradle.kts`.
+
+Verify before publishing:
+
+```bash
+apksigner verify --print-certs build/app/outputs/apk/release/*.apk
+unzip -p build/app/outputs/apk/release/*.apk \
+  assets/kernel_profiles/6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k.conf | head -6
+sha256sum build/app/outputs/apk/release/*.apk
+```
+
+If the APK replaces one signed with a different key, Android rejects it
+(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`); uninstall first, which also deletes app data.
+
+## Repack the APK (historical, upstream-asset flow)
 
 Use the upstream release APK as the base and replace only the native library and profile assets. A full rezip violates Android's `resources.arsc` stored/aligned rule.
 
@@ -78,9 +116,9 @@ unzip -p GhostLock-patched3.apk lib/arm64-v8a/libghostlock.so \
 adb install -r GhostLock-patched3.apk
 ```
 
-Install BakaSU (`com.resukisu.resukisu`) and Shizuku (`moe.shizuku.privileged.api`) first. GhostLock extracts `libksud.so` from the BakaSU APK during the handoff.
+Install BakaSU (`com.resukisu.resukisu`) first. GhostLock extracts `libksud.so` from the BakaSU APK during the handoff, in-process. Install Shizuku (`moe.shizuku.privileged.api`) only if you want the shell flow.
 
-## Shizuku and wireless ADB
+## Optional: Shizuku and wireless ADB
 
 1. Enable **Developer options → Wireless debugging** on the phone.
 2. Pair and connect as usual:
@@ -107,7 +145,7 @@ Install BakaSU (`com.resukisu.resukisu`) and Shizuku (`moe.shizuku.privileged.ap
    adb shell su -c id
    adb shell cat /proc/modules | grep kernelsu
    ```
-7. After reboot, start Shizuku and Run again. Root is temporary.
+7. After reboot the LKM is gone; tap **Run** again (add Shizuku only for the shell flow). Root is temporary.
 
 ## Release
 

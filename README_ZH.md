@@ -12,7 +12,9 @@ GhostLock 利用 CVE-2026-43499 在支持的 Android 内核上获取临时 root�
 
 内核必须精确匹配 `uname -r`。请在[支持设备列表](docs/kernel_profiles/SUPPORTED_DEVICES_ZH.md)中核对内核版本。
 
-如果启用了 Shizuku，请先通过 ADB 启动，再运行 GhostLock。点击 GhostLock 的状态卡授权。
+默认不需要 ADB，也不需要 Shizuku：内置 profile（`recommend_shizuku = 0`、`w3_attempts = 2`）
+在 App 进程内完成 seccomp 清除并加载 KernelSU。ADB 只用于首次安装 APK。
+如需走 shell 通道，也可以启用 Shizuku：先用 ADB 启动其服务，再在 GhostLock 状态卡授权。
 
 ## 添加内核 profile
 
@@ -31,7 +33,7 @@ GhostLock 利用 CVE-2026-43499 在支持的 Android 内核上获取临时 root�
 <details>
 <summary>导出 profile 并运行原生程序</summary>
 
-需要 Android NDK、`make`、Gradle 和 ADB。通过 adb shell 运行时会跳过 App 的 seccomp 绕过阶段。
+需要 Android NDK、`make`、Gradle 和 ADB。通过 adb shell 运行时进程本身没有 seccomp 过滤器，W3 会直接跳过。
 
 ```sh
 make -C src ghostlock

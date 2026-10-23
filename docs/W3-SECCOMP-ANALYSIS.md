@@ -1,6 +1,9 @@
-# W3 seccomp analysis
+# W3 seccomp analysis and fix
 
-This is the detailed account of GhostLock's W3 stage on the Infinix Smart 20 (X6840), kernel `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`. It covers the original panic, the two attempted fixes, the exact evidence, and why the in-process path still cannot load KernelSU.
+This is the account of GhostLock's W3 stage on the Infinix Smart 20 (X6840), kernel
+`6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`: the original panic, why the
+"no-panic" masked variant could never work, the root cause, and the fix that lets W3 run
+in-process without ADB and without Shizuku.
 
 ## The stage
 
@@ -8,216 +11,192 @@ GhostLock's temporary-root chain has three write stages:
 
 | Stage | Target | Purpose | Result on X6840 |
 |---|---|---|---|
-| W1 | `selinux_enforcing` | set SELinux permissive | works |
-| W2 | `task_struct.cred` | replace the child credentials with root | works; child `uid=0` |
-| W3 | `task_struct.seccomp` / `thread_info.flags` | disable seccomp before `ksud` | **no-op**; child stays `Seccomp: 2` |
+| W1 | `selinux_state.enforcing` | SELinux permissive | works |
+| W2 | `task_struct.cred` | child credentials become `init_cred` | works; child `uid=0` |
+| W3 | `thread_info.flags` + `task_struct.seccomp` | disable seccomp for the child and its descendants | **works with this fix** |
 
-W3 matters because the rooted child then runs `ksud late-load`, which calls `finit_module`. If seccomp is still active, that syscall is filtered and the module never loads.
+W3 matters because the rooted child then runs `ksud late-load`, which calls
+`finit_module`. The app process inherits the zygote seccomp filter, and that filter
+answers `finit_module` with `SIGSYS`/`EPERM`. Until seccomp is off, no module loads, so
+there is no KernelSU and no `su`.
 
-## First failure: the zero-store panic
+## What the write primitive can actually store
 
-The original W3 code issued two 8-byte zero stores:
+The select/tcp erase relink (`src/core/support/util.cpp`,
+`src/core/memory/payload_builder.cpp`) stamps one waiter word into `[target]`. The
+stamped word is either
 
-1. `thread_info.flags = 0`
-2. `seccomp.mode = 0`
+- **zero** - the leaf arm (`WriteMode::Zero`, `leaf=1`): waiter =
+  `{pc = target - 8, rb_right = 0, rb_left = target}` and the relink stores `0` at
+  `[target]`; or
+- **a dereferenceable kernel pointer** - the value arm (`leaf=0`): waiter =
+  `{pc = value, rb_right = 0, rb_left = target}`.
 
-Both are wrong on this kernel:
-
-- `thread_info.flags` is a 64-bit word. Zeroing it clears **every** `TIF_*` bit, not just `TIF_SECCOMP` (bit 11). That corrupts scheduling and signal state.
-- `struct seccomp` is `{ int mode; int filter_count; struct seccomp_filter *filter; }`. An 8-byte zero at `mode` also clears `filter_count`, leaving the filter pointer inconsistent.
-
-The result was a kernel panic:
-
-```
-ro.boot.bootreason = kernel_panic
-sys.boot.reason     = kernel_panic,bug
-```
-
-## Second attempt: remove the flags write
-
-The flags store was removed so only `seccomp.mode = 0` remained. That still panicked: the `filter_count` corruption alone is enough, and the W3 leaf/route also remained unstable.
-
-## Third attempt: masked flags + mode/filter_count
-
-The current code (in `src/core/session/backend/cve_2026_43499_backend.cpp` and `src/core/memory/payload_builder.*`) adds two write modes:
-
-- `WriteMode::SeccompFlags` — write `~ (1 << 11)` (`0xFFFFFFFFFFFFF7FF`) to clear only `TIF_SECCOMP`.
-- `WriteMode::SeccompMode` — write `0x0000000100000000` at `seccomp.mode`, i.e. `mode=0`, `filter_count=1`.
-
-The intent is correct: preserve every other flag and keep the filter reference count valid. The build completes all W3 steps and **does not panic**. But the write does not take effect.
-
-### Evidence
-
-Run-state, captured live via `run-as`:
+The walk consumes `value` as an rb-parent pointer before it relinks. A bit mask
+(`0xFFFFFFFFFFFFF7FF`) or a user-looking word (`0x0000000100000000`) is not a mapped
+kernel address, so the walk never reaches the store. That is the whole explanation for
+this log line from the previous build:
 
 ```
-w1a completed  w1b completed
-w2a completed  w2b completed
-w3a completed  w3b completed  w3c completed
-```
-
-Native log:
-
-```
-W3-0: leaf dir attempt 1/4
-W3-0: leaf dir target=0xffffff801c11e5f0 mode=1 leaf=1
-W3: TIF_SECCOMP mask + mode attempt 1/1
 === W3: TIF_SECCOMP === target=0xffffff801c11ddc0 mode=3 leaf=0
 === W3: seccomp mode === target=0xffffff801c11e6a8 mode=4 leaf=0
 seccomp finit_module probe = 0xfffffffd
-W3 seccomp clear failed; ksud late-load will likely stay blocked
-W3 seccomp bypass failed after 1 chain rounds; ksud late-load will likely stay blocked
-...
-KernelSU module load failed
 ```
 
-`ksud` log:
+The route reported success, nothing was written, and the child stayed
+`Seccomp: 2 Seccomp_filters: 1`. The fix therefore cannot be a better mask; it has to be
+a word whose whole 64-bit slot may legitimately be zero.
 
-```
-[*] root script start uid=0 euid=0
-[*] seccomp=Seccomp: 2 Seccomp_filters: 1
-[*] late-load kmi=android15-6.6
-[*] late-load exit=0
-[*] temp su uid=0; watching kernelsu.ko
-[!] KernelSU module not loaded
-```
+## Root cause: the 6.6 seccomp state machine
 
-The crucial line is `Seccomp: 2 Seccomp_filters: 1`: the root child is still in seccomp mode 2 with one filter. The W3 writes were accepted by the route but did not change the target.
+Read from the v6.6 sources this analysis relies on (`arch/arm64/include/asm/thread_info.h`,
+`include/linux/thread_info.h`, `arch/arm64/kernel/entry-common.c`, `kernel/seccomp.c`,
+`kernel/fork.c`, `kernel/exit.c`):
 
-## Address arithmetic
+1. **The gate is `TIF_SECCOMP`, bit 11 of `thread_info.flags` at `task+0x00`.**
+   arm64 6.6 has no `syscall_work` word, so `set_task_syscall_work(task, SECCOMP)`
+   resolves to `set_ti_thread_flag(ti, TIF_SECCOMP)`. Every syscall checks that flag.
+2. **`SECCOMP_MODE_DISABLED` is a `BUG()` in `__secure_computing()`.** The switch has
+   `STRICT`, `FILTER`, `DEAD`, and `default: BUG();`. So zeroing `seccomp.mode` while
+   the flag is still set panics on the *next* syscall. This - not the filter reference
+   count - is why the "mode-only" attempt panicked.
+3. **A child re-arms the flag.** `kernel/fork.c copy_seccomp()` ends with
+   `if (p->seccomp.mode != SECCOMP_MODE_DISABLED) set_task_syscall_work(p, SECCOMP)`.
+   Clearing only the flag therefore leaves the `sh -> ksud` chain filtered, which is
+   exactly where the module load happens.
+4. **`DISABLED` with the filter pointer still set is consistent.**
+   `kernel/exit.c release_task()` calls `seccomp_filter_release()` regardless of `mode`,
+   which zeroes `seccomp.filter` and drops the reference, so `free_task()`'s
+   `WARN_ON_ONCE(tsk->seccomp.filter)` does not fire.
+
+Put together, the only two stores W3 needs are both **zero**:
+
+| Write | Target | Effect |
+|---|---|---|
+| 1 | `task + 0x00` | `thread_info.flags = 0`, i.e. `TIF_SECCOMP` gone (the other bits a live task carries are resched/signal/task-work) |
+| 2 | `task + 0x8e8` | `seccomp.mode = 0`, `filter_count = 0` - a real `SECCOMP_MODE_DISABLED` |
+
+Because `mode` is `DISABLED`, `copy_seccomp()` stops re-arming the flag, and every
+descendant inherits the cleared flags word via `dup_task_struct()`. The rooted child,
+the shell it execs, `ksud`, and `ksud`'s own children all run filter-free, which is the
+property the late-load needs.
+
+## Ordering and the parked-child window
+
+Order matters at exactly one point: write 2 must never land before write 1 while the
+child can execute a syscall (that is the `BUG()`). Two mechanisms make it safe:
+
+- **The child is parked.** W3 sends the `S` command; the child calls `raise(SIGSTOP)`
+  and the parent confirms the group stop with `waitpid(..., WUNTRACED)`. No userspace
+  syscall of the child can observe an intermediate state, whatever order the kernel
+  writes land in.
+- **A partial state is still safe.** If write 1 lands and write 2 does not, the child is
+  merely filter-free for itself; if write 1 does not land, write 2 is skipped entirely
+  (`zero_word(flags) && zero_word(mode)` short-circuits). The only unsafe combination is
+  "mode cleared, flag still set", and the sequence never issues it.
+
+After the writes the child is resumed with `SIGCONT` and reports its own
+`/proc/self/status` `Seccomp:` value. W3 then forks a child that reports *its own* mode:
+`copy_seccomp()` copies `mode` and re-arms `TIF_SECCOMP` only while the mode is not
+`DISABLED`, so a forked child that also reports `Seccomp: 0` proves the clear reached the
+descendant chain - which is exactly what `sh -> ksud` needs. That fork probe is the
+verdict. The `finit_module` errno probe is logged for the record only (see the correction
+below: it cannot separate a filtered syscall from an unfiltered one).
+
+`docs/analysis/w3-seccomp-zero-store-plan.md` records the design, the reviewed
+lifecycle, and the verification plan.
+
+## Address arithmetic (unchanged)
 
 From the captured run:
 
 | Target | Address | Offset from child task |
 |---|---|---|
-| child task base | `0xffffff801c11ddc0` | — |
+| child task base | `0xffffff801c11ddc0` | - |
 | `cred` (W2) | `0xffffff801c11e5e0` | `+0x820` (2080) |
 | `comm` (leaf probe) | `0xffffff801c11e5f0` | `+0x830` (2096) |
 | `thread_info.flags` | `0xffffff801c11ddc0` | `+0` |
 | `seccomp` | `0xffffff801c11e6a8` | `+0x8e8` (2280) |
 
-The targets are correct:
+W2 writing the credential at `+0x820` and the child reporting `uid=0` proves the child
+base and the credential offset. The seccomp target is the same base plus the profile's
+`task_struct.seccomp = 2280`, and the W3 leaf-direction probe (zero the comm word, then
+read `/proc/self/comm`) proves both that a zero store lands on `[target]` and which side
+of a target it hits.
 
-- W2 writes the credential at `+0x820` and the child reports `uid=0`. So the child base and the `cred` offset are right.
-- The W3 `seccomp` target is the same child base plus the profile's `task_struct.seccomp = 2280`.
-- The leaf probe writes at `comm` (`+0x830`) with `leaf=1`; the captured run resolved `leaf_to_target8 = 0`.
-
-Because W2 succeeds at the same child base, the problem is not the address or the profile offset. It is the **value** being written.
-
-## Why the values are no-ops
-
-The primitive used by `select_stack` stamps the fake waiter's `right` field. The supported value space is:
-
-- `0` (`WriteMode::Zero`), or
-- a **valid kernel pointer** (`WriteMode::Credential`, e.g. `init_cred_alias`).
-
-The route's `right` field is consumed as a pointer by the kernel's PI/rb-tree path. Zero and a mapped kernel pointer are valid inputs; they are written to the target. The W3 values are neither:
-
-- `0xFFFFFFFFFFFFF7FF` — a bitmask, not a mapped pointer.
-- `0x0000000100000000` — a user-space-looking address, not a mapped kernel pointer.
-
-The route still returns success, and the run-state records the step as completed, but the store does not land. That is why the logs show `mode=3` / `mode=4` writes completing and the child still at `Seccomp: 2`.
-
-This is also why the earlier zero store behaved differently: zero **is** in the supported value space, so it did write — and corrupted `filter_count` / all `TIF_*` bits, causing the panic.
-
-A true fix therefore cannot be a different offset or a different pair of magic values. It needs one of:
-
-- a 4-byte or bit-granular write, so `mode` can be cleared without touching `filter_count`;
-- an arbitrary-value write, so the mask / `mode=0, filter_count=1` word can be stamped;
-- a different kernel object/bug that disables the filter for the root child.
-
-None of these is available in the current `select_stack` / `tcp_zerocopy` write paths.
-
-## The Shizuku path
-
-Shizuku runs the native exploit through `adb` as **shell UID 2000**. The shell process has no app seccomp filter, so:
-
-- W3 is skipped (`w3_attempts=0` and the shell flow).
-- `ksud late-load` can call `finit_module`.
-- KernelSU loads.
-
-The previously verified Shizuku run produced:
+## Expected log for the fixed run
 
 ```
-child uid = 2000
-...
-[*] late-load exit=0
-/proc/modules: kernelsu 192512 1 - Live 0x0000000000000000 (O)
-su -c id: uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0
+W3-0: leaf dir attempt 1/4
+leaf dir probe comm_len=0 comm[0]=00
+W3: child stopped for the seccomp clear
+W3: TIF_SECCOMP clear attempt 1/2
+=== W3: TIF_SECCOMP clear === target=0xffffff801c11ddc0 mode=1 leaf=1
+W3: seccomp mode clear attempt 1/2
+=== W3: seccomp mode clear === target=0xffffff801c11e6a8 mode=1 leaf=1
+W3: TIF_SECCOMP re-clear attempt 1/2
+W3: child reports Seccomp: 0
+forked child reports Seccomp: 0
+forked child inherits mode=0 (copy_seccomp stops re-arming)
+finit_module probe errno field = 0x9 (informational)
+child seccomp disabled (mode=0); descendants run filter-free
 ```
 
-This is the supported path in the release profile (`recommend_shizuku=1`, `w3_attempts=0`).
+The two `Seccomp: 0` lines are the gate; the `finit_module` line is informational only.
+The root script then logs a filter-free `late-load` and `/proc/modules` gains `kernelsu`.
 
-## Reproduction (test only)
+## Failure signatures
 
-The in-process W3 attempt is preserved as a diagnostic. To reproduce it:
+| Log | Meaning |
+|---|---|
+| `W3 could not park the rooted child` | the child died or stopped reading the command pipe; the chain parks/respawns |
+| `W3: child reports Seccomp: 2` | write 2 did not land; the child is still safe (flag write only) and the chain retries |
+| `W3: mode is disabled but a forked child is re-armed` | mode landed but the flag write did not; the child runs, but descendants are re-armed |
+| `forked child reports Seccomp: 2` | the same condition, seen by the fork probe (the verdict) |
+| `finit_module probe errno field = 0xfffffffd` | `-ESRCH`; ambiguous by construction - it is neither a pass nor a fail, which is why it is informational |
 
-1. Use a test profile with `w3_attempts=1` and `recommend_shizuku=0`.
-2. Turn the Shizuku toggle off.
-3. Run GhostLock.
-4. Expect: all W3 steps complete, no panic, `Seccomp: 2`, `finit_module probe = 0xfffffffd`, `KernelSU module not loaded`.
+## Reproduction
 
-Unloading the Shizuku path is not recommended for normal use. The in-process path cannot succeed with the current primitive.
+1. Use the built-in profile (`recommend_shizuku = 0`, `w3_attempts = 2`,
+   `w3_chain_rounds = 2`).
+2. Leave **Run via Shizuku** off.
+3. Tap **Run**.
+4. Expect `child reports Seccomp: 0`, a probe errno in the 2..40 range, and `kernelsu`
+   in `/proc/modules` once the root script finishes.
+
+The Shizuku path still works: a shell flow has no app filter (`Seccomp: 0`) and W3
+returns immediately with `no app seccomp filter (shell flow); skipping W3`.
+
+## Corrections adopted from the disarm review
+
+An earlier revision of this document was superseded by a "disarm" change that removed the
+W3 writes entirely and recorded the step as `failed`. Its review produced three corrections
+that survive here and are now enforced in code:
+
+1. **`~(1ULL << TIF_SECCOMP_BIT)` was never a flag-preserving mask.** It sets every *other*
+   bit to 1. The fix does not resurrect a mask: it zeroes whole words, which is the only
+   value the primitive can store and the only value that is correct here.
+2. **The `finit_module` errno cannot prove anything.** `0xfffffffd` is `-ESRCH`, not a
+   `SIGSYS` marker; a `SECCOMP_RET_KILL` action terminates the thread instead of returning,
+   and an *unfiltered* `finit_module` also returns `-ESRCH` for a bogus fd. The probe is now
+   logged only; the fork probe (above) carries the verdict.
+3. **A step may only be recorded `completed` after verification.** `run_state::fail()` and
+   the app's `RunStateCodec.Failed` are now used for refused/failed W3 steps, so a rejected
+   write can never look like a working bypass again.
+
+The disarm's *conclusion* ("W3 cannot work with this primitive") was wrong: it held only
+for non-zero values. Zero is inside the value space, and `thread_info.flags` /
+`seccomp.mode` are both words whose correct new value is zero.
 
 ## Evidence
 
-- [`docs/evidence/ghostlock_native_final.log`](evidence/ghostlock_native_final.log) — full native log, W3 target lines and probe.
-- [`docs/evidence/ghostlock_ksu_final.log`](evidence/ghostlock_ksu_final.log) — root script log with `Seccomp: 2` and `late-load`.
-- [`docs/evidence/ghostlock_root.sh`](evidence/ghostlock_root.sh) — exact handoff script.
-- [`docs/evidence/runstate_poll.log`](evidence/runstate_poll.log) — live step states, all W1–W3 completed.
-- [`docs/evidence/README.md`](evidence/README.md) — how to read the evidence and the timeline.
+- [`docs/evidence/ghostlock_native_final.log`](evidence/ghostlock_native_final.log) - the
+  pre-fix run: mask targets, `probe = 0xfffffffd`.
+- [`docs/evidence/ghostlock_ksu_final.log`](evidence/ghostlock_ksu_final.log) - pre-fix
+  root script with `Seccomp: 2`.
+- [`docs/evidence/ghostlock_root.sh`](evidence/ghostlock_root.sh) - the handoff script.
+- [`docs/evidence/runstate_poll.log`](evidence/runstate_poll.log) - pre-fix step states.
 
-## Conclusion
-
-- The W3 **panic** is fixed by the masked/mode form: no kernel crash, all steps complete.
-- The W3 **seccomp bypass** is not fixed. The write primitive cannot store the required values. The child remains `Seccomp: 2`; `finit_module` is blocked; the module does not load.
-- The final configuration uses Shizuku and `w3_attempts=0`. Do not enable the in-process W3 path on this kernel.
-
-## Corrections (review pass)
-
-Three claims in this document were wrong or overstated. The code now enforces the
-conclusions below rather than relying on prose.
-
-### 1. `SeccompFlags` was never a flag-preserving mask
-
-`~(1ULL << kernel::TIF_SECCOMP_BIT)` evaluates to `0xFFFFFFFFFFFFF7FF`. This does
-**not** clear only `TIF_SECCOMP`: it sets **every other bit to 1**, including
-`TIF_SIGPENDING`, `TIF_NEED_RESCHED`, `TIF_NOTIFY_RESUME`, `TIF_UPROBE` and
-`TIF_PATCH_PENDING`. A blind store cannot express a read-modify-write, so no
-constant can be the correct value here. The earlier text called this "the safe
-variant"; it was only less fatal than the zero store, not correct.
-
-### 2. The `finit_module` probe does not prove what it claimed
-
-`seccomp finit_module probe = 0xfffffffd` is `-ESRCH`, **not** a SIGSYS marker. A
-`SECCOMP_RET_KILL` action terminates the thread and cannot return an errno; a
-`SECCOMP_RET_ERRNO` action surfaces as an ordinary negative errno (commonly
-`-ENOSYS` = 38). An **unfiltered** `finit_module` also returns `-ESRCH` for a bad
-fd, so this probe cannot separate "the filter blocked it" from "the syscall ran
-and rejected its arguments". It can confirm success (`code == 0`); it cannot
-confirm that seccomp is still armed. The old comment asserted the opposite.
-
-### 3. W3 now reports failure instead of success
-
-Previously `w3b` / `w3c` were recorded as `completed` as soon as the route
-returned, even when the target was unchanged — which is how the no-op writes were
-mistaken for a working bypass. The status file now uses a terminal `failed`
-state, and a step is only marked `completed` after `verify_seccomp_probe_stage()`
-confirms the change.
-
-### Enforcement
-
-- `payload_write_layout()` rejects `WriteMode::SeccompFlags` and
-  `WriteMode::SeccompMode`; `payload_write_layout_matches_request()` rejects them
-  again defensively.
-- The W3 stage refuses up front when `w3_attempts > 0`, before arming the route.
-  Without that guard the request would be rejected inside
-  `prepare_kernel_page()` and burn the full heap-prepare timeout (240 s) first.
-- Nothing is written to the kernel on this path, so the panic cannot recur even if
-  `w3_attempts` is raised.
-
-### Still true
-
-The primitive's value space (`0` or a valid mapped kernel pointer) is unchanged.
-W3 cannot be made to work with this bug. The supported path remains the
-adb/shell flow, where the process reports `Seccomp: 0` and W3 is skipped.
+Those files are the *old* evidence and are kept as the failure record. A device gate log
+for the fixed build belongs in `docs/analysis/device-gates/W3-ZERO-STORE.md` (gate
+template in `docs/development/documentation-standards.md`).

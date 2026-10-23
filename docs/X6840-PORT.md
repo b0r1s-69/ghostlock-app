@@ -77,7 +77,7 @@ Key fields:
 release = "6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k"
 schema_version = 1
 kernel_major = 6
-recommend_shizuku = 1
+recommend_shizuku = 0
 kernel_phys_load = 1074266112
 kernel_phys_offset = 1073741824
 
@@ -86,7 +86,9 @@ fallback { to = "none" }
 
 execution {
   selected_cpus { main = 6  consumer = 7 }
-  w3_attempts = 0
+  w3_attempts = 2
+  w3_chain_rounds = 2
+  w3_settle_us = 50000
 }
 ```
 
@@ -106,7 +108,7 @@ After install, GhostLock shows **Supported**, and **Advanced options → Paramet
 Built-in profile: 6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k
 ```
 
-If a user profile is active, **Load configuration → the profile → Unload**. The built-in profile is the safe one (`w3_attempts=0`, `recommend_shizuku=1`).
+If a user profile is active, **Load configuration → the profile → Unload**. The built-in profile is the safe one (`w3_attempts=2`, `recommend_shizuku=0`).
 
 ## Results
 
@@ -114,9 +116,9 @@ If a user profile is active, **Load configuration → the profile → Unload**. 
 |---|---|
 | W1 SELinux permissive | works |
 | W2 credential overwrite | works; child `uid=0` |
-| W3 seccomp bypass | writes complete but **no-op**; child stays `Seccomp: 2 Seccomp_filters: 1` |
-| `ksud late-load` (in-process) | exits 0; module not loaded |
-| Shizuku path | W3 skipped; `ksud` loads KernelSU; root works |
+| W3 seccomp bypass | **works**: child parked, flags + `seccomp.mode` zeroed, child reports `Seccomp: 0` |
+| `ksud late-load` (in-process) | loads KernelSU; `su -c id` returns root |
+| Shizuku path | optional; W3 skips itself when the process has no filter |
 | Persistent root | no; bootloader locked |
 
 The W3 details are in [W3-SECCOMP-ANALYSIS.md](W3-SECCOMP-ANALYSIS.md).
@@ -129,7 +131,7 @@ The W3 details are in [W3-SECCOMP-ANALYSIS.md](W3-SECCOMP-ANALYSIS.md).
 4. Add the profile, the index entry, and the supported-device row to the app.
 5. Build the native core and repack the APK (see [BUILD-AND-INSTALL.md](BUILD-AND-INSTALL.md)).
 6. Install, load the built-in profile, and verify **Supported**.
-7. Use Shizuku for root; leave `w3_attempts=0`.
+7. Run in-process (no Shizuku, no ADB); keep `w3_attempts=2`.
 
 ## Safety notes
 

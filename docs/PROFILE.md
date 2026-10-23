@@ -8,7 +8,7 @@ The X6840 profile is built into the APK and also provided standalone at [`profil
 release = "6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k"
 schema_version = 1
 kernel_major = 6
-recommend_shizuku = 1
+recommend_shizuku = 0
 kernel_phys_load = 1074266112   # 0x40080000
 kernel_phys_offset = 1073741824 # 0x40000000
 
@@ -17,12 +17,17 @@ fallback { to = "none" }
 
 execution {
   selected_cpus { main = 6  consumer = 7 }
-  w3_attempts = 0
-  w3_chain_rounds = 1
+  w3_attempts = 2
+  w3_chain_rounds = 2
+  w3_settle_us = 50000
 }
 ```
 
-`w3_attempts = 0` is important. It prevents the in-process W3 path from running. On this kernel W3 cannot clear seccomp (see [W3-SECCOMP-ANALYSIS.md](W3-SECCOMP-ANALYSIS.md)), and the old zero-store variant panicked.
+`w3_attempts = 2` drives the in-process seccomp clear: two zero stores
+(`thread_info.flags`, then the `{mode, filter_count}` word) while the rooted child is
+parked, then a `Seccomp: 0` read-back and the forked `finit_module` probe. Zero is the only
+value the write primitive can land, so a masked write is not an option; see
+[W3-SECCOMP-ANALYSIS.md](W3-SECCOMP-ANALYSIS.md).
 
 ## Geometry
 
@@ -85,8 +90,8 @@ The extractor first produced `kernel_phys_offset = 0` because it read the **host
 - Route: `select_stack`, `waiter_shift = -2`.
 - CPU pair: main 6, consumer 7.
 - Fallback: none.
-- W3: `w3_attempts = 0`, `w3_chain_rounds = 1`.
-- Shizuku: recommended.
+- W3: `w3_attempts = 2`, `w3_chain_rounds = 2`, `w3_settle_us = 50000`.
+- Shizuku: not required (the flag stays available for shell flows).
 
 `select_stack` was the high-confidence route from the extractor. `tcp_zerocopy` had `compact_waiter = null`; `multicast_waiter` had no derivable geometry. The tcp variant was tested and also panicked in W3 before the mask/value change, so it is not a fallback.
 
@@ -112,8 +117,8 @@ and indexed in `app/src/main/assets/kernel_profiles/index.conf`:
 1. GhostLock → **Advanced options** → **Parameter configuration**.
 2. The source line must read **Built-in profile: 6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k**.
 3. If a user profile is active, open **Load configuration** → the profile → **Unload**.
-4. Enable **Run via Shizuku** (the built-in profile recommends it).
-5. Start Shizuku, return, and tap **Run**.
+4. Leave **Run via Shizuku** off (the built-in profile no longer recommends it).
+5. Tap **Run**; no Shizuku server or ADB is involved.
 
 The app also supports importing the standalone HOCON via **Load configuration → Import offsets.conf (v2)**. Importing is optional; the built-in copy is preferred because it cannot drift from the APK.
 
@@ -124,14 +129,16 @@ A correctly loaded profile gives:
 - **Supported** on the home screen.
 - The exact kernel string.
 - **Built-in profile** in Parameter configuration.
-- `w3_attempts = 0` and `recommend_shizuku = 1` in the profile.
-- Shizuku path: `su -c id` returns root and `/proc/modules` shows `kernelsu`.
+- `w3_attempts = 2` and `recommend_shizuku = 0` in the profile.
+- In-process path: `child reports Seccomp: 0`, the probe returns a normal errno, then
+  `su -c id` returns root and `/proc/modules` shows `kernelsu`.
 
 If the app shows a user profile such as `msf_88`, unload it. That overlay was used for W3 testing and is not the safe configuration.
 
 ## Safety
 
 - Use only with the exact kernel above. The profile will not match a different build.
-- Do not enable `w3_attempts` on this kernel; the write primitive cannot perform the seccomp clear and the older zero-store form panics.
+- Do not set `w3_attempts = 0` and then expect the module to load in-process: that skips
+  the seccomp clear, which is only correct for shell/Shizuku runs (`Seccomp: 0`).
 - The bootloader remains locked; root is temporary.
 - An OTA that changes the kernel requires a new extraction and profile.

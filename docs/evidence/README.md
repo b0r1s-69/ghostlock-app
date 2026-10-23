@@ -1,6 +1,13 @@
 # Evidence
 
-These are the captured logs from the test device (Infinix Smart 20, kernel `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`). They are sanitized: no LAN IP, ADB pairing code, account name, or serial number.
+These are the captured logs from the test device (Infinix Smart 20, kernel
+`6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`). They are sanitized: no LAN IP, ADB
+pairing code, account name, or serial number.
+
+> **These are pre-fix logs.** They record the W3 seccomp clear failing, i.e. the bug fixed
+> by the zero-store W3 ([W3-SECCOMP-ANALYSIS.md](../W3-SECCOMP-ANALYSIS.md)). They are kept
+> as the failure baseline; a post-fix gate log belongs in
+> [`docs/analysis/device-gates/W3-ZERO-STORE.md`](../analysis/device-gates/W3-ZERO-STORE.md).
 
 ## Files
 
@@ -15,7 +22,11 @@ These are the captured logs from the test device (Infinix Smart 20, kernel `6.6.
 
 1. Earlier W3 builds: an 8-byte zero store at `thread_info.flags` / `seccomp.mode` panicked the kernel (`kernel_panic,bug`).
 2. Flags write removed: still panicked.
-3. Mask/value build: all steps complete, **no panic**, but seccomp is unchanged.
+3. Mask/value build: all steps complete, **no panic**, but seccomp is unchanged (the
+   values were outside the primitive's value space).
+4. Zero-store build: `thread_info.flags` and `seccomp.mode` are zeroed while the rooted
+   child is parked; the child reports `Seccomp: 0` and the module loads. No device log for
+   this build is committed yet - see the gate record.
 
 The `ro.boot.bootreason=kernel_panic` on the phone is sticky for the boot in which the earlier panic happened. The mask/value run at 19:20 completed and did not reboot the phone; its run-state is all `completed`.
 

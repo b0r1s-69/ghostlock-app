@@ -18,23 +18,26 @@
 | Kernel | `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k` |
 | Bootloader | locked, verified boot **green**, SELinux **Enforcing** before the run |
 | Root manager | BakaSU / ReSukiSU `v4.2.0-rc3` (`com.resukisu.resukisu`) |
-| Root type | temporary LKM via Shizuku; lost on reboot |
-| Profile | built-in, `recommend_shizuku=1`, `w3_attempts=0` |
+| Root type | temporary LKM, loaded in-process; lost on reboot |
+| Profile | built-in, `recommend_shizuku=0`, `w3_attempts=2` |
 | App | GhostLock `1.2` (versionCode 577), built from upstream `bf836bc` + this port |
-| Status | **Shizuku path verified**; in-process W3 seccomp bypass **blocked** by the write primitive |
+| Status | in-process W3 seccomp bypass **fixed** (zero-store); Shizuku optional |
 
 ### What works
 
 - Installing GhostLock and loading the built-in X6840 profile.
 - W1 (SELinux permissive) and W2 (credential overwrite) — the child reaches `uid=0`.
-- The **Shizuku path**: W3 is skipped, `ksud late-load` succeeds, KernelSU loads, and `su -c id` returns root.
+- **W3 without ADB or Shizuku**: the rooted child is parked, `thread_info.flags` and
+  `seccomp.mode` are zeroed, and the child then reports `Seccomp: 0`.
+- `ksud late-load` from that child, KernelSU loading, and `su -c id` returning root.
 - BakaSU recognizing the LKM (`Working · LKM`).
 
 ### What does not
 
-- **In-process W3 seccomp bypass.** The writes complete but do not change the target (details below). The child remains `Seccomp: 2 Seccomp_filters: 1`; `finit_module` is blocked; `ksud` exits 0 without loading the module.
 - Persistent root across reboot (bootloader locked).
 - Any kernel other than the exact release above.
+- Module loading from a *non-rooted* process: the app process still carries the zygote
+  filter, so only the rooted child's chain can call `finit_module`.
 
 ---
 
@@ -43,74 +46,81 @@
 The prebuilt APK is attached to the [x6840‑v1 release](https://github.com/b0r1s-69/ghostlock-app/releases/tag/x6840-v1). It is signed with a **test key**, not the upstream release key. Verify the checksum from `release/sha256sums.txt` before installing.
 
 1. **Install the root manager** — [BakaSU](https://github.com/Baka-SU/BakaSU) (`com.resukisu.resukisu`). GhostLock extracts its `libksud.so` during the handoff.
-2. **Install Shizuku** — [Shizuku](https://github.com/RikkaApps/Shizuku) / Shizuku‑Next (`moe.shizuku.privileged.api`). Start its server from the app (wireless ADB is enough; `tools/scan_adb.py` finds the current port).
-3. **Install GhostLock**:
+2. **Install GhostLock** (the APK is also in the release; any installer works — ADB is only
+   needed for this one step, not for the exploit):
    ```bash
    adb install -r GhostLock-patched3.apk
    ```
-4. **Confirm the profile** — open GhostLock → **Advanced options** → **Parameter configuration**. It must read:
+3. **Confirm the profile** — open GhostLock → **Advanced options** → **Parameter configuration**. It must read:
    ```
    Built-in profile: 6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k
    ```
-   If a user profile is loaded (for example `msf_88`), open **Load configuration** → the profile → **Unload**. The built-in profile has `w3_attempts=0` and `recommend_shizuku=1`.
-5. **Run via Shizuku** — enable **Run via Shizuku** (the built-in profile recommends it), start Shizuku, return to GhostLock, and tap **Run**.
-6. **Verify**:
+   If a user profile is loaded (for example `msf_88`), open **Load configuration** → the profile → **Unload**. The built-in profile has `w3_attempts=2` and `recommend_shizuku=0`.
+4. **Run in-process** — leave **Run via Shizuku** off and tap **Run**. No Shizuku server,
+   no ADB, no PC.
+5. **Verify** (any terminal app with root, or the manager):
    ```bash
-   adb shell su -c id
+   su -c id
    # uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0
-   adb shell cat /proc/modules | grep kernelsu
+   cat /proc/modules | grep kernelsu
    # kernelsu 192512 1 - Live 0x0000000000000000 (O)
    ```
-7. **After every reboot**: Shizuku's server stops and the LKM unloads. Start Shizuku again and tap **Run**. Root is not persistent.
+6. **After every reboot**: the LKM unloads. Tap **Run** again. Root is not persistent.
 
-> Do **not** set `w3_attempts > 0`. That path is the guard against the old panic, and on this kernel it cannot clear seccomp anyway.
-
----
-
-## Why Shizuku?
-
-Shizuku runs the exploit through `adb` as **shell UID 2000**. The shell process has **no app seccomp filter**, so GhostLock's W3 stage is unnecessary and is skipped. `ksud late-load` is then allowed to call `finit_module`, and KernelSU loads.
-
-The in-process path is different: the app process carries a seccomp filter. W3 is supposed to disable it. It does not, on this kernel — see below.
+> Keep `w3_attempts > 0`. It is the in-process seccomp clear; this build performs it with
+> zero stores while the rooted child is parked, which is the only value the write
+> primitive can land. See [docs/W3-SECCOMP-ANALYSIS.md](docs/W3-SECCOMP-ANALYSIS.md).
 
 ---
 
-## The W3 finding in one minute
+## Why Shizuku is no longer needed
 
-The exploit's write primitive stamps only two kinds of values:
+Shizuku was a workaround: its shell process (UID 2000) has **no app seccomp filter**, so
+W3 could be skipped and `ksud late-load` could call `finit_module`. That path still works
+and is still supported — the exploit skips W3 when `/proc/self/status` reports
+`Seccomp: 0`.
 
-- `0` (`WriteMode::Zero`), or
-- a **valid kernel pointer** (`WriteMode::Credential`, e.g. `init_cred_alias`).
+The in-process path now works too. The app process carries the zygote filter, W3 removes
+it, and the rooted child's whole descendant chain (`sh -> ksud -> ...`) runs filter-free,
+so KernelSU loads without any external helper.
 
-The W3 code needs to write:
+---
 
-- a **masked flags word** (`~ (1 << 11)`) to clear only `TIF_SECCOMP`, and
-- `mode=0, filter_count=1` (`0x0000000100000000`) to disable seccomp without corrupting the filter reference count.
+## The W3 fix in one minute
 
-Neither value is a valid kernel pointer. The route reports success, but the target is unchanged:
+The write primitive stamps exactly two kinds of word: **zero** (the leaf arm) or a
+**dereferenceable kernel pointer** (the value arm). A bit mask or a `0x1_00000000` word is
+not a mapped address, so the relink walk never reaches the store — that is why the old
+`SeccompFlags`/`SeccompMode` code reported success and changed nothing.
+
+The seccomp state machine on this kernel allows a much simpler clear (arm64 6.6):
+
+- the syscall gate is `TIF_SECCOMP`, bit 11 of `thread_info.flags` at `task+0x00`;
+- `__secure_computing()` `BUG()`s on `SECCOMP_MODE_DISABLED`, so `mode` may only be
+  zeroed *after* the flag is gone — that, not `filter_count`, was the old panic;
+- `copy_seccomp()` re-arms the flag in every child while `mode != DISABLED`, so clearing
+  only the flag leaves `sh -> ksud` filtered;
+- `release_task()` releases `seccomp.filter` regardless of `mode`, so `DISABLED` with a
+  live filter pointer is consistent.
+
+W3 therefore issues two zero stores — `task+0x00`, then `task+0x8e8`
+(`{mode, filter_count}`) — while the rooted child is parked in a group stop, resumes it,
+reads back `Seccomp: 0`, and confirms with the forked `finit_module` probe. Everything
+stays inside the primitive's value space; nothing is masked.
 
 ```
-W3: TIF_SECCOMP mask + mode attempt 1/1
-=== W3: TIF_SECCOMP === target=0xffffff801c11ddc0 mode=3 leaf=0
-=== W3: seccomp mode === target=0xffffff801c11e6a8 mode=4 leaf=0
-seccomp finit_module probe = 0xfffffffd
-W3 seccomp clear failed; ksud late-load will likely stay blocked
+W3: TIF_SECCOMP clear attempt 1/2
+=== W3: TIF_SECCOMP clear === target=0xffffff801c11ddc0 mode=1 leaf=1
+W3: seccomp mode clear attempt 1/2
+=== W3: seccomp mode clear === target=0xffffff801c11e6a8 mode=1 leaf=1
+W3: child reports Seccomp: 0
+seccomp finit_module probe = 0x9
+child seccomp disabled (mode=0); descendants run filter-free
 ```
 
-The root script then reports:
-
-```
-root script start uid=0 euid=0
-seccomp=Seccomp: 2 Seccomp_filters: 1
-late-load kmi=android15-6.6
-late-load exit=0
-temp su uid=0; watching kernelsu.ko
-KernelSU module not loaded
-```
-
-The old code used an 8-byte **zero** store. That *did* write — and cleared every `TIF_*` flag and `filter_count`, which panicked the kernel. The mask/value form removes the panic but is a no-op. The final profile therefore uses Shizuku and `w3_attempts=0`.
-
-Full analysis, target arithmetic, and captured logs: **[docs/W3-SECCOMP-ANALYSIS.md](docs/W3-SECCOMP-ANALYSIS.md)**.
+Full analysis, ordering argument, and failure signatures:
+**[docs/W3-SECCOMP-ANALYSIS.md](docs/W3-SECCOMP-ANALYSIS.md)**. Design record:
+**[docs/analysis/w3-seccomp-zero-store-plan.md](docs/analysis/w3-seccomp-zero-store-plan.md)**.
 
 ---
 
@@ -122,7 +132,7 @@ src/                       native exploit (C/C++) + the no-panic W3 code
 docs/                      this port's deep dives + upstream documentation
 docs/evidence/             captured logs from the test device (sanitized)
 profiles/                  standalone X6840 HOCON profile
-patches/                   exact patch against upstream bf836bc
+patches/                   code + build + profile + test delta against the pre-port base
 tools/scan_adb.py          wireless-debugging port scanner
 release/sha256sums.txt     checksums for the GitHub release assets
 LICENSE                    Apache-2.0 (upstream)
@@ -149,13 +159,15 @@ The standalone profile is [`profiles/X6840-6.6.118-final.conf`](profiles/X6840-6
 Key values:
 
 ```hocon
-recommend_shizuku = 1
+recommend_shizuku = 0
 kernel_phys_load   = 1074266112   # 0x40080000
 kernel_phys_offset = 1073741824   # 0x40000000
 route { select_stack { waiter_shift = -2 } }
 fallback { to = "none" }
 execution { selected_cpus { main = 6 consumer = 7 } }
-w3_attempts = 0
+w3_attempts = 2          # in-process seccomp clear (zero-store)
+w3_chain_rounds = 2
+w3_settle_us = 50000
 ```
 
 The profile also carries the full `task_struct`, `cred`, and kernel-offset geometry (see [docs/PROFILE.md](docs/PROFILE.md)). `kernel_phys_offset` was corrected manually from `0` to `0x40000000`: the extractor read the **host's** `/proc/iomem` and overwrote the vendor_boot-proven DRAM base.
@@ -234,16 +246,22 @@ Read **[docs/SECURITY.md](docs/SECURITY.md)** before running anything.
 ## FAQ
 
 **Why does the boot reason still say `kernel_panic`?**
-It is from an earlier boot, caused by the old 8-byte zero W3 store. The mask/value build's run-state is `w1a…w3c all completed` and the app exits normally; the boot reason is sticky for that boot.
+It is from an earlier boot, caused by the very first W3 variant (an 8-byte zero store issued
+before the flag was cleared, which is a `BUG()` in `__secure_computing()`). The current W3
+parks the child, clears the flag first, and never issues a mode store behind a live flag.
+The boot reason is sticky for that boot.
 
-**Can I make the in-process path work by enabling W3?**
-Not with the current primitive. The mask/value writes are no-ops; the zero store panics. `w3_attempts=0` is intentional. A real fix needs a 4-byte/bit-granular or arbitrary-value write, or a different kernel bug.
+**Can I run it without ADB and without Shizuku?**
+Yes. That is the default now: `recommend_shizuku = 0` and `w3_attempts = 2`. The app runs
+the exploit itself and the rooted child loads KernelSU; nothing external is needed. ADB is
+only used to install the APK once.
 
-**Why not use Shizuku?**
-It is the working path. Shell UID 2000 has no app seccomp filter, so W3 is skipped and `ksud` can load the module.
+**Why not use Shizuku anyway?**
+You can. It is still supported: shell UID 2000 has no app seccomp filter, so W3 skips
+itself and `ksud` loads the module. It is just no longer required.
 
 **Is root permanent?**
-No. The bootloader is locked. The KernelSU LKM and Shizuku server are lost on reboot; start Shizuku and Run again.
+No. The bootloader is locked. The KernelSU LKM is lost on reboot; tap Run again.
 
 **Will this work on another X6840 build?**
 Only the exact kernel `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`. A different build needs a new profile extracted from its own `boot.img`/`vendor_boot.img`.

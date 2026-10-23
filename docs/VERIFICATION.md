@@ -21,17 +21,25 @@ Open GhostLock:
 
 - Home: **Supported**.
 - **Advanced options → Parameter configuration**: **Built-in profile: 6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k**.
-- **Run via Shizuku** is on.
+- **Run via Shizuku** is off (Shizuku is optional).
 - No active user overlay (for example `msf_88`). If one is present, **Load configuration** → profile → **Unload**.
 
-The built-in profile has `recommend_shizuku = 1` and `w3_attempts = 0`.
+The built-in profile has `recommend_shizuku = 0` and `w3_attempts = 2`.
 
-## Shizuku path (supported)
+## In-process path (default)
 
-1. Start Shizuku from its app; it runs the server as shell UID 2000.
-2. Return to GhostLock; the status should read **Shizuku ready**.
+1. Confirm the built-in profile is loaded (previous section).
+2. Leave **Run via Shizuku** off, start Shizuku only if you want the shell flow.
 3. Tap **Run**.
-4. Verify:
+4. The log must show the zero-store W3 clear:
+   ```text
+   W3: TIF_SECCOMP clear attempt 1/2
+   W3: seccomp mode clear attempt 1/2
+   W3: child reports Seccomp: 0
+   seccomp finit_module probe = 0x9
+   child seccomp disabled (mode=0); descendants run filter-free
+   ```
+5. Verify:
    ```bash
    adb shell su -c id
    # uid=0(root) gid=0(root) groups=0(root) context=u:r:ksu:s0
@@ -39,13 +47,14 @@ The built-in profile has `recommend_shizuku = 1` and `w3_attempts = 0`.
    adb shell cat /proc/modules | grep kernelsu
    # kernelsu 192512 1 - Live 0x0000000000000000 (O)
    ```
-5. BakaSU should show **Working · LKM**.
+6. BakaSU should show **Working · LKM**.
 
-The Shizuku path skips W3; `ksud late-load` can call `finit_module`.
+A shell flow (Shizuku or `adb shell`) has no app filter, so W3 returns immediately with
+`no app seccomp filter (shell flow); skipping W3` and `ksud` can load the module.
 
-## In-process path (not supported)
+## Pre-fix signature (historical)
 
-If Shizuku is off and a profile with `w3_attempts=1` is used, the run completes all W3 steps but cannot clear seccomp:
+Older builds logged this and could not load the module in-process:
 
 ```text
 Seccomp: 2 Seccomp_filters: 1
@@ -55,7 +64,9 @@ late-load exit=0
 KernelSU module not loaded
 ```
 
-There is **no panic** with the current mask/value build. The child stays filtered, so the module cannot load. This is expected; do not treat it as a new bug.
+`probe = 0xfffffffd` means the probe child was killed by `SIGSYS`, i.e. the filter was
+still armed. If you see it on the fixed build, W3 did not land: check
+`W3: child reports Seccomp:` in the same log. Do not re-enable the old mask/value path.
 
 ## Failure signatures
 
@@ -77,11 +88,11 @@ There is **no panic** with the current mask/value build. The child stays filtere
    python3 tools/scan_adb.py <phone-ip>
    adb connect <phone-ip>:<port>
    ```
-4. Open GhostLock; confirm the built-in profile and `w3_attempts=0`.
-5. Start Shizuku and tap **Run** again.
+4. Open GhostLock; confirm the built-in profile and `w3_attempts=2`.
+5. Tap **Run** again (add Shizuku only if you use the shell flow).
 6. Verify `su -c id` and `/proc/modules`.
 
-Root is temporary; the Shizuku server and LKM are lost on every reboot.
+Root is temporary; the LKM is lost on every reboot.
 
 ## Evidence
 
