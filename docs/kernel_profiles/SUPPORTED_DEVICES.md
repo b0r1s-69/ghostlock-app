@@ -78,7 +78,7 @@ bypass there as well, so it saves time even where it isn't required.
 | `6.6.118-android15-8-ge58033dc8ea6-abogki498046332-4k` | OPPO Pad 5, OnePlus Pad 2, OPPO Find X8s                         |
 | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      | OPPO Find X8 / Find X8 Pro                                       |
 | `6.6.118-android15-8-g21be90ecfb5e-ab15480137-4k`      | Honor Magic V5 (10.0.0.105)                                      |
-| `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`      | Infinix Smart 20 (X6840) · Shizuku recommended                   |
+| `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`      | Infinix Smart 20 (X6840) · in-process W3 fixed                   |
 | `6.6.127-android15-8-gb947b5758b2a-ab15580855-4k`      | Motorola Edge 40                                                 |
 | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` | REDMI K90 Pro Max                                                |
 | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` | Xiaomi 17 / 17 Pro / 17 Pro Max / 17 Ultra                       |

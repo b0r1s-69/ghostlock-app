@@ -89,9 +89,9 @@
     <string name="shizuku_status_permission_required">Grant Shizuku access when asked</string>
     <string name="shizuku_status_ready">Shizuku ready</string>
     <string name="shizuku_status_checking">Checking Shizuku status</string>
-    <string name="w3_shizuku_hint_title">Enable Shizuku?</string>
-    <string name="w3_shizuku_hint_message">The last run failed at the W3 seccomp bypass stage. Running via Shizuku (shell uid, no seccomp) skips it.</string>
-    <string name="w3_shizuku_hint_enable">Enable</string>
+    <string name="w3_shizuku_hint_title">W3 did not finish?</string>
+    <string name="w3_shizuku_hint_message">The last run stopped at the W3 seccomp clear, which retries on the next Run. If it keeps stopping there, running via Shizuku (shell uid, no seccomp) skips that stage entirely.</string>
+    <string name="w3_shizuku_hint_enable">Enable Shizuku</string>
     <string name="run_interrupted_title">Previous run interrupted</string>
     <string name="run_interrupted_message">The last attack stopped mid-way (the device may have panicked and rebooted). Check the device and try again.</string>
     <string name="dialog_dismiss">Dismiss</string>

@@ -10,13 +10,13 @@
 **通过 Shizuku 执行**开关自动打开；你可以在本次会话中关掉它，关掉后应用在本次会话内不再要求 Shizuku。
 
 Shizuku 以 shell 用户身份执行攻击，而 shell 没有 seccomp 过滤，因此会跳过 W3 seccomp bypass 阶段。
-使用步骤：
+使用步骤（仅在使用 shell 通道时需要）：
 
 1. 先启动 Shizuku（例如通过 ADB）并保持运行。
 2. 点击应用顶部的状态卡，在弹出的请求中授予权限。
 
 未标记的固件不会自动打开该开关，但**任何设备都可以手动开启**：通过 Shizuku 执行同样会跳过
-W3 seccomp bypass，即使并非必需，也能节省时间。
+W3 seccomp bypass，即使并非必需，也能节省时间。X6840 已默认使用进程内 W3，无需 ADB 或 Shizuku。
 
 | Kernel                                                 | Devices                                                          |
 |--------------------------------------------------------|------------------------------------------------------------------|
@@ -75,6 +75,7 @@ W3 seccomp bypass，即使并非必需，也能节省时间。
 | `6.6.118-android15-8-ge58033dc8ea6-abogki498046332-4k` | OPPO Pad 5, OnePlus Pad 2, OPPO Find X8s                         |
 | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      | OPPO Find X8 / Find X8 Pro                                       |
 | `6.6.118-android15-8-g21be90ecfb5e-ab15480137-4k`      | Honor Magic V5 (10.0.0.105)                                      |
+| `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`      | Infinix Smart 20 (X6840) · 已修复进程内 W3                        |
 | `6.6.127-android15-8-gb947b5758b2a-ab15580855-4k`      | Motorola Edge 40                                                 |
 | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` | REDMI K90 Pro Max                                                |
 | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` | Xiaomi 17 / 17 Pro / 17 Pro Max / 17 Ultra                       |

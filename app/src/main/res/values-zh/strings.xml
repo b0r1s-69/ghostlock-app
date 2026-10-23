@@ -89,9 +89,9 @@
     <string name="shizuku_status_permission_required">请在弹窗中授予 Shizuku 权限</string>
     <string name="shizuku_status_ready">Shizuku 已就绪</string>
     <string name="shizuku_status_checking">正在检查 Shizuku 状态</string>
-    <string name="w3_shizuku_hint_title">建议启用 Shizuku</string>
-    <string name="w3_shizuku_hint_message">上次执行在 W3 seccomp bypass 阶段失败。通过 Shizuku 执行（shell uid、无 seccomp）可跳过该阶段。</string>
-    <string name="w3_shizuku_hint_enable">启用</string>
+    <string name="w3_shizuku_hint_title">W3 未完成？</string>
+    <string name="w3_shizuku_hint_message">上次执行停在 W3 seccomp 清除，下次执行会自动重试。若始终停在这一步，可改用 Shizuku 执行（shell uid、无 seccomp），直接跳过该阶段。</string>
+    <string name="w3_shizuku_hint_enable">启用 Shizuku</string>
     <string name="run_interrupted_title">上次攻击未完成</string>
     <string name="run_interrupted_message">上次攻击在某个阶段中断（设备可能已内核 panic 并重启）。请确认设备状态后重试。</string>
     <string name="dialog_dismiss">关闭</string>
