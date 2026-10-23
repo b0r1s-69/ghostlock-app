@@ -20,7 +20,7 @@ APK facts:
 
 - package `com.ghostlock.app`, versionCode `584`, versionName `1.3`
 - minSdk `31`, targetSdk `37`, ABI `arm64-v8a` only
-- built from branch `w3-zero-store` = tag `x6840-v2` + the W3 zero-store fix
+- built from the `x6840-v3` tag (branch `very-not-stable-dev`), on top of `x6840-v2`
 - toolchain: JDK 21, NDK `27.3.13750724`, Gradle wrapper from this repository
 - `lib/arm64-v8a/libghostlock.so` is the stripped native core built from this tree
   (inside the APK: `sha256 d9930ac4009cf4e794f10524b1d06b357d72a342c11156b51fa9fda9eb07adcf`)
