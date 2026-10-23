@@ -6,6 +6,14 @@
 #include "kernel/offset.h"
 
 namespace ghostlock::kernel {
+    /* NDK r27+ (16 KB page support) exposes PAGE_SIZE as a macro from
+     * <bits/page_size.h>; it has to be cleared before this declaration can be a
+     * definition instead of a collision. The ported kernelsnitch headers guard
+     * the same name with #ifndef. Both spellings are 4096, so no value changes. */
+#ifdef PAGE_SIZE
+#undef PAGE_SIZE
+#endif
+
     inline constexpr unsigned PAGE_SHIFT = 12;
     inline constexpr unsigned long PAGE_SIZE = 1UL << PAGE_SHIFT;
     inline constexpr unsigned KS_PAGE_SIZE = 4096;

@@ -60,27 +60,49 @@ shell` reporting `Seccomp: 0`. W3 has never contributed to a successful root.
 
 ## Verification
 
-Run and passing in this environment:
+Run and passing:
 
 - `payload_builder_test` — pass (`payload builder request/layout vectors passed`)
 - `run_state_test` — pass
 - `make -C src host-attack-dataflow-test` — pass (`backend_dataflow_test: ok`)
 - `-fsyntax-only -Wall -Wextra -Wconversion -Wsign-conversion` on all four touched
   native files — clean (only pre-existing `kernelsnitch/utils.h` warnings remain)
+- **`make -C src ghostlock` with NDK r27.3.13750724 (API 35)** — pass, arm64 PIE,
+  721104 bytes
+- **`tools/cmp_disasm.py`** baseline (`main` + the `PAGE_SIZE` build fix) vs this
+  branch — the 6 resolvable attack functions are `IDENTICAL` in instruction count
+  and shape; `LAYOUT-SHIFT` annotations only, i.e. addresses moved because the
+  change alters code size. `multicast_owner_worker` / `multicast_waiter_worker`
+  are `MISSING` in **both** binaries; the same failure reproduces with
+  baseline-vs-baseline, so it is a pre-existing property of this build
+  configuration (multicast route not linked), not a regression.
 
-**NOT run — and required before merge** (principle 7: report uncertainty):
+**Still NOT run:**
 
-- **`make -C src ghostlock` (NDK build).** No NDK, `clang++` or `cmake` on this
-  host. The arm64 binary was not produced.
-- **`tools/cmp_disasm.py` against the 8 attack functions.** Requires the built
-  arm64 binary from the step above, so it is blocked by the same gap.
-- **`make -C src lint-tidy`.** `clang-tidy` is not installed.
+- **`make -C src lint-tidy`** — `clang-tidy` is not installed on this host.
 - **Device gate** (cold boot, fixed CPU pair, KernelSU unloaded) and its archived
   record. Not attempted.
 
-Consequently this change is **unverified on device**. The host harness exercises
-the real backend through stub routes; it proves the control flow and the
-status semantics, not kernel behaviour.
+The change is therefore **host- and binary-verified, but not device-gated**. The
+host harness exercises the real backend through stub routes; `cmp_disasm` proves
+the attack window's machine code is unchanged in shape. Neither proves kernel
+behaviour on a device.
+
+## Build-compatibility fix included
+
+`src/core/kernel/constants.hpp` — NDK r27+ defines `PAGE_SIZE` as a macro in
+`<bits/page_size.h>` (16 KB page support), which collided with the repo's own
+`constexpr PAGE_SIZE` and made **both** `main` and this branch fail to compile:
+
+```
+core/kernel/constants.hpp:10:36: error: expected unqualified-id
+```
+
+The declaration is now preceded by `#ifdef PAGE_SIZE / #undef PAGE_SIZE`,
+mirroring the guard the ported `kernelsnitch` headers already use. Both spellings
+are `4096`, so no value changes. This is a build fix, not a behaviour change, and
+it is required before any commit on this repo can be built with a current NDK.
+
 
 ## Risk
 
