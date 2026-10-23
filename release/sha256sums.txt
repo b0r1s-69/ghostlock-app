@@ -1,7 +1,7 @@
 # GhostLock x6840-v3 release assets (release-page names -> repo paths noted).
-#   GhostLock-v1.3(584)-arm64-v8a-x6840-v3.apk -> built by :app:assembleRelease
+#   GhostLock-v1.3-584-arm64-v8a-x6840-v3.apk -> built by :app:assembleRelease
 #   X6840-6.6.118-final.conf    -> profiles/X6840-6.6.118-final.conf
 #   ghostlock-x6840-final.patch -> patches/ghostlock-x6840-final.patch
-859fa63910a57765d833e9d9c097cd6426bd3eeb50a03dcee718b438d5acb895  GhostLock-v1.3(584)-arm64-v8a-x6840-v3.apk
+859fa63910a57765d833e9d9c097cd6426bd3eeb50a03dcee718b438d5acb895  GhostLock-v1.3-584-arm64-v8a-x6840-v3.apk
 7a2dba8ae21b8062f9db499c10ebc82905e0e8685957389eee3adbcfc666b82d  X6840-6.6.118-final.conf
 41b9bb74ada1bb80fcdbdef18702462edd9ce4516884d781c3af72963588ed1f  ghostlock-x6840-final.patch

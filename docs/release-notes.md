@@ -12,7 +12,7 @@ locked, root stays temporary.
 
 | Asset | SHA-256 |
 |---|---|
-| `GhostLock-v1.3(584)-arm64-v8a-x6840-v3.apk` | `859fa63910a57765d833e9d9c097cd6426bd3eeb50a03dcee718b438d5acb895` |
+| `GhostLock-v1.3-584-arm64-v8a-x6840-v3.apk` | `859fa63910a57765d833e9d9c097cd6426bd3eeb50a03dcee718b438d5acb895` |
 | `X6840-6.6.118-final.conf` | `7a2dba8ae21b8062f9db499c10ebc82905e0e8685957389eee3adbcfc666b82d` |
 | `ghostlock-x6840-final.patch` | listed in [`release/sha256sums.txt`](../release/sha256sums.txt) |
 
@@ -56,7 +56,7 @@ APK facts:
 1. Install the root manager (BakaSU, `com.resukisu.resukisu`). Shizuku
    (`moe.shizuku.privileged.api`) is optional.
 2. Uninstall any previous GhostLock build signed by a different key.
-3. `adb install -r "GhostLock-v1.3(584)-arm64-v8a-x6840-v3.apk"`
+3. `adb install -r "GhostLock-v1.3-584-arm64-v8a-x6840-v3.apk"`
 4. Open GhostLock → **Advanced options → Parameter configuration**; confirm
    **Built-in profile: 6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k**, and unload any user
    profile.
