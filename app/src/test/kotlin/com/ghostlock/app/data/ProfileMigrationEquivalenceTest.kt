@@ -43,7 +43,33 @@ class ProfileMigrationEquivalenceTest {
                 }
                 .toSortedSet()
 
-            assertEquals("fixture must cover every current 6.x builtin", current6x, legacyReleases)
+            /* The remote-main capture predates eight bundled profiles, and the
+             * X6840 port adds a ninth. Pin that set explicitly: a genuinely new
+             * profile still fails here instead of slipping into an exclusion. */
+            val withoutLegacyCapture = setOf(
+                "6.1.134-android14-11-maybe-dirty",
+                "6.1.138-android14-11-g51f8c580613d-ab13911623",
+                "6.1.145-android14-11-g9b69cc399ae1-ab14819715",
+                "6.1.157-android14-11-g82d681c9b06b-ab14634535",
+                "6.1.25-android14-11-maybe-dirty",
+                "6.12.38-android16-5-gb575a0b6e647-ab14355190-4k",
+                "6.6.118-android15-8-g0b9c3bf6db7f-ab14877662-4k",
+                "6.6.30-android15-8-g24ffe62b0a0e-abogki387229724-4k",
+                "6.6.89-android15-8-g5a0ffb447c1d-ab13771415-4k",
+            ).let { pinned ->
+                /* Keep the pin honest: it must be exactly what the assets lack. */
+                assertEquals(
+                    "uncovered built-in list drifted from the pin",
+                    pinned,
+                    current6x - legacyReleases,
+                )
+                pinned
+            }
+            assertEquals(
+                "a captured release is no longer built in",
+                legacyReleases,
+                current6x - withoutLegacyCapture,
+            )
             assertEquals("remote/main fixture size", 55, legacyReleases.size)
 
             val pair = CpuPair(primary = 0, consumer = 1)
