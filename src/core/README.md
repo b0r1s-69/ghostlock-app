@@ -21,7 +21,7 @@ GhostLock compiles each supported frontend/backend/middleware combination as a `
 | [pipeline.hpp](route/pipeline.hpp) | The execution entry. Checks the combination and contracts at compile time and returns `RunResult`. |
 | [orchestrator.hpp](route/orchestrator.hpp) | `run_orchestrated_pipeline` dispatches each catalogued target to its checked pipeline. |
 | `route/*_route.{h,cpp}` | Route implementations and Android hook bodies. |
-| `session/backend/cve_2026_43499_backend.*` | W1/W2/W3 steps templated on middleware, instantiated for each catalogued route. |
+| `session/backend/cve_2026_43499_backend.*` | W1/W2/W3 steps templated on middleware, instantiated for each catalogued route. W3 parks the rooted child (`victim_process` `S` step) and clears seccomp with two whole-word zero stores - the only value the write primitive can land. |
 
 ## Directories
 

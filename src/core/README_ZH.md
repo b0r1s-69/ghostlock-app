@@ -21,7 +21,7 @@ GhostLock 将每个受支持的 frontend、backend 和 middleware 组合编译�
 | [pipeline.hpp](route/pipeline.hpp) | 执行入口。在编译期检查组合与契约，返回 `RunResult`。 |
 | [orchestrator.hpp](route/orchestrator.hpp) | `run_orchestrated_pipeline` 将每个已登记目标分派到经过检查的 pipeline。 |
 | `route/*_route.{h,cpp}` | Route 实现与 Android hook 实现。 |
-| `session/backend/cve_2026_43499_backend.*` | 模板化在 middleware 上的 W1/W2/W3 步骤，为每个已登记 route 实例化。 |
+| `session/backend/cve_2026_43499_backend.*` | 模板化在 middleware 上的 W1/W2/W3 步骤，为每个已登记 route 实例化。W3 先把 root child 停住（`victim_process` 的 `S` 步骤），再用两次整字零写清除 seccomp——这是写原语唯一能落地的值。 |
 
 ## 目录
 
