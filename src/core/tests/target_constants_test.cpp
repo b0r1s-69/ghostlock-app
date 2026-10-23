@@ -27,6 +27,18 @@ static_assert(ghostlock::kernel::CRED_COPY_OFF == 0x1080);
 static_assert(ghostlock::kernel::TCP_FAKE_TASK_OFF == 0x5800);
 static_assert(ghostlock::kernel::TCP_CRED_COPY_OFF == 0x6800);
 
+/* W3 zero-store layout: the gate bit lives in the flags word at task+0, and
+ * {mode, filter_count} share one 8-byte slot at task + task_struct.seccomp.
+ * Both stores are whole 64-bit words of zero, which is the only value the
+ * primitive can land. */
+static_assert(ghostlock::kernel::TASK_THREAD_INFO_FLAGS_OFF == 0);
+static_assert(ghostlock::kernel::TIF_SECCOMP_BIT == 11);
+static_assert(ghostlock::kernel::TASK_SECCOMP_OFF == 0x8e8);
+static_assert(ghostlock::kernel::SECCOMP_MODE_OFF == 0);
+static_assert(ghostlock::kernel::SECCOMP_FILTER_COUNT_OFF == 4);
+static_assert(ghostlock::kernel::SECCOMP_FILTER_OFF == 8);
+static_assert((ghostlock::kernel::TASK_SECCOMP_OFF % 8) == 0);
+
 /* Compatibility vectors for target.h values deliberately left profile-owned.
  * They prove CPP01 did not silently reinterpret device/kernel data as C++
  * compile-time authority. */

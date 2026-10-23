@@ -10,8 +10,11 @@ namespace ghostlock::route::middleware {
     Status run_middleware_route(session::ExploitSession &session,
                                 const memory::WriteRequest &request) {
         (void) session;
-        (void) request;
         host::script().record("route");
+        host::script().record_write(
+            static_cast<uintptr_t>(request.target),
+            static_cast<int32_t>(request.mode),
+            request.preserve_child ? 0 : 1);
         return host::script().next_route();
     }
 } // namespace ghostlock::route::middleware

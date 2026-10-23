@@ -15,6 +15,18 @@ namespace ghostlock::session::victim {
         return VictimSpawn{spawn.pid, spawn.task};
     }
 
+    int32_t stop_child(VictimContext &pipes) {
+        host::script().record("stop_child");
+        (void) pipes;
+        return host::script().stop_child_result;
+    }
+
+    int32_t continue_and_report_seccomp(VictimContext &pipes) {
+        host::script().record("continue_child");
+        (void) pipes;
+        return host::script().reported_seccomp_mode;
+    }
+
     int32_t verify_selinux_stage(void *context) {
         (void) context;
         host::script().record("verify_selinux");
@@ -27,10 +39,15 @@ namespace ghostlock::session::victim {
         return host::script().next_w2();
     }
 
-    int32_t verify_seccomp_probe_stage(void *context) {
+    int32_t verify_fork_seccomp_stage(void *context) {
         (void) context;
         host::script().record("verify_seccomp");
         return host::script().next_seccomp();
+    }
+
+    void probe_finit_module_stage(void *context) {
+        (void) context;
+        host::script().record("probe_finit_module");
     }
 
     int32_t verify_leaf_dir_stage(void *context) {

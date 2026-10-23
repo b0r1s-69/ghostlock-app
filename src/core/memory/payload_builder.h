@@ -3,33 +3,36 @@
 
 #include <cstddef>
 #include <cstdint>
-
-
-#include <cstddef>
-#include <cstdint>
 #include <span>
 #include <type_traits>
 
 namespace ghostlock::memory {
     /* Immutable description of one kernel write. `preserve_child` selects the
- * one-child erase layout; false selects the leaf/zero layout. */
+ * one-child erase layout; false selects the leaf/zero layout.
+ *
+ * Value space (device-verified): the select/tcp erase relink stores exactly one
+ * of
+ *   - zero, through the leaf arm (`preserve_child == false`): the waiter is
+ *     stamped {pc = target - 8, right = 0, left = target} and the relink
+ *     stores 0 at [target];
+ *   - a *dereferenceable kernel pointer*, through the value arm
+ *     (`preserve_child == true`): {pc = value, right = 0, left = target} and
+ *     the relink stores `value` at [target].
+ *
+ * Anything else (a bitmask, or a user-space-looking word) is outside that
+ * space: the walk consumes `value` as an rb parent pointer, so a value that is
+ * not a mapped kernel address never reaches the store. A caller that needs to
+ * clear bits must therefore find a word where zeroing the whole 64-bit slot is
+ * correct - W3 clears thread_info.flags and seccomp.mode this way.
+ *
+ * Historical note: the removed mask arm used `~(1ULL << bit)`, which sets every
+ * OTHER bit to 1 rather than preserving the live flags, so it was never a
+ * correct flag-clearing value even in principle. A blind store cannot express a
+ * read-modify-write; only a whole-word zero is both storable and correct. */
     enum class WriteMode : int32_t {
         Disabled = 0,
         Zero = 1,
         Credential = 2,
-        /* UNSUPPORTED — always rejected by payload_write_layout() and
-         * payload_write_layout_matches_request().
-         *
-         * The primitive stores only 0 or a valid mapped kernel pointer, so it
-         * cannot express a TIF mask or the `mode = 0, filter_count = 1` word.
-         * These enumerators are retained only so the W3 stage can be compiled
-         * and can fail explicitly; they never reach the kernel.
-         *
-         * Historical note: the earlier mask value used `~(1ULL << bit)`, which
-         * sets every OTHER TIF bit to 1 rather than preserving existing flags,
-         * so it was never a correct flag-clearing mask even in principle. */
-        SeccompFlags = 3,
-        SeccompMode = 4,
     };
 
     struct WriteRequest final {

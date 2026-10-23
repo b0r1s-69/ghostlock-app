@@ -112,6 +112,10 @@ namespace ghostlock::kernel {
     inline constexpr int32_t SECCOMP_MODE_OFF = 0x00;
     inline constexpr int32_t SECCOMP_FILTER_COUNT_OFF = 0x04;
     inline constexpr int32_t SECCOMP_FILTER_OFF = 0x08;
+    /* The syscall seccomp gate: arm64 6.6 has no syscall_work word, so
+ * set_task_syscall_work(SECCOMP) lands on this bit of thread_info.flags.
+ * W3 clears the whole flags word (the primitive has no masked store) while
+ * the rooted child is parked; see docs/W3-SECCOMP-ANALYSIS.md. */
     inline constexpr int32_t TIF_SECCOMP_BIT = 11;
     inline constexpr int32_t PFA_NO_NEW_PRIVS_BIT = 0;
 
