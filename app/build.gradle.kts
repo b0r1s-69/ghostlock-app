@@ -25,6 +25,12 @@ val gitVersionCode = runCatching {
     1
 }
 
+/* Floor above the previously published build (577). A shallow clone or a fresh
+ * fork reports a small commit count, which would make every later build a
+ * "downgrade" that Android refuses; the only fix would be uninstalling, which
+ * destroys app data. Keep the counter authoritative once it catches up. */
+val appVersionCode = maxOf(gitVersionCode, 578)
+
 val buildInfoSrc = layout.buildDirectory.dir("generated/source/buildInfo")
 
 val generateBuildInfo = tasks.register("generateBuildInfo") {
@@ -67,7 +73,7 @@ android {
         applicationId = "com.ghostlock.app"
         minSdk = 31
         targetSdk = 37
-        versionCode = gitVersionCode
+        versionCode = appVersionCode
         versionName = appVersionName
     }
     androidResources {
@@ -150,7 +156,7 @@ androidComponents {
 }
 
 base {
-    archivesName.set("$appName-v$appVersionName($gitVersionCode)")
+    archivesName.set("$appName-v$appVersionName($appVersionCode)")
 }
 
 kotlin {

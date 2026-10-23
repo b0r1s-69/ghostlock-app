@@ -116,3 +116,32 @@ built-in X6840 profile ships `w3_attempts = 0`).
 
 Revert this commit. Nothing outside the listed files is affected, and no profile
 or wire format changed.
+
+## Device install (informational, not a functional gate)
+
+A full `:app:assembleDebug` build was produced with NDK r27.3.13750724 and
+`platforms;android-37.2`, then installed on the reference X6840
+(`6.6.118-android15-8-g0b9c3bf6db7f`, Android 16):
+
+- `adb install -r` → Success, `versionCode=578`, `lastUpdateTime` advanced,
+  app data preserved.
+- `am start com.ghostlock.app/.ui.MainActivity` → process up, `logcat -b crash`
+  empty.
+- Packaged `lib/arm64-v8a/libghostlock.so` contains the `W3 disarmed` string, and
+  the X6840 profile asset is present.
+- Existing root was unaffected: `su -c id` → `uid=0 … u:r:ksu:s0`, `kernelsu`
+  still Live (installing the APK does not touch the LKM).
+
+This verifies **packaging and launch**, not the exploit chain. The exploit was
+not re-run: root was already active, and a re-run would risk a panic on a running
+device for no benefit. The cold-boot device gate in `AGENTS.md` therefore remains
+outstanding.
+
+## Build metadata fix included
+
+`app/build.gradle.kts` — `versionCode` came from `git rev-list --count HEAD`,
+which on a shallow clone or fresh fork reports a value far below the previously
+published build (88 vs 577). Android refuses a "downgrade", so every later build
+would have forced an uninstall and destroyed app data. The value is now
+`maxOf(gitVersionCode, 578)`; the commit counter still takes over once it passes
+the floor.
